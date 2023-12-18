@@ -143,12 +143,32 @@ class IndividualPodPickling:
 
 if __name__ == "__main__":
     import pickle
+    import tempfile
+    from pathlib import Path
 
     from pod.common import plot_deps
-    from pod.storage import DictPodStorage
+    from pod.storage import DictPodStorage, FilePodStorage
 
-    pod_storage = DictPodStorage()
-    pod_pickling = IndividualPodPickling(pod_storage)
+    # Initialize storage
+    # storage_mode = "dict"
+    storage_mode = "file"
+    pod_storage: Optional[PodStorage] = None
+    if storage_mode == "dict":
+        pod_storage = DictPodStorage()
+    elif storage_mode == "file":
+        tmp_dir = Path(tempfile.gettempdir())
+        root_dir = tmp_dir / "pod_test"
+        print(f"root_dir= {root_dir}")
+        pod_storage = FilePodStorage(root_dir)
+    else:
+        raise ValueError(f"Invalid storage_mode= {storage_mode}")
+
+    # Initialize pickling
+    pickling_mode = "individual"
+    if pickling_mode == "individual":
+        pod_pickling = IndividualPodPickling(pod_storage)
+    else:
+        raise ValueError(f"Invalid pickling_mode= {pickling_mode}")
 
     # Save namespace.
     shared_buf = [0, 1, 2, 3, 4, 5, 6]
@@ -170,4 +190,5 @@ if __name__ == "__main__":
     )
 
     # Visualize dependency graph.
-    plot_deps(pod_storage.dep_pids)
+    if isinstance(pod_storage, DictPodStorage):
+        plot_deps(pod_storage.dep_pids)
