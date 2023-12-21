@@ -27,14 +27,14 @@ install:          ## Install the project in dev mode.
 .PHONY: fmt
 fmt:              ## Format code using black & isort.
 	$(ENV_PREFIX)isort pod/
-	$(ENV_PREFIX)black -l 79 pod/
-	$(ENV_PREFIX)black -l 79 tests/
+	$(ENV_PREFIX)black -l 127 pod/
+	$(ENV_PREFIX)black -l 127 tests/
 
 .PHONY: lint
 lint:             ## Run pep8, black, mypy linters.
-	$(ENV_PREFIX)flake8 pod/
-	$(ENV_PREFIX)black -l 79 --check pod/
-	$(ENV_PREFIX)black -l 79 --check tests/
+	$(ENV_PREFIX)flake8 --max-line-length 127 pod/
+	$(ENV_PREFIX)black -l 127 --check pod/
+	$(ENV_PREFIX)black -l 127 --check tests/
 	$(ENV_PREFIX)mypy --ignore-missing-imports pod/
 
 .PHONY: test

@@ -158,6 +158,4 @@ class FilePodStorage(PodStorage):
         return self.root_dir / f"{pid.tid}_{pid.oid}_dep.pkl"
 
     def estimate_size(self) -> int:
-        return sum(
-            f.stat().st_size for f in self.root_dir.glob("**/*") if f.is_file()
-        )
+        return sum(f.stat().st_size for f in self.root_dir.glob("**/*") if f.is_file())

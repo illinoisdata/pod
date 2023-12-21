@@ -6,21 +6,26 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
-from pickle import Pickler as BasePickler
-from pickle import Unpickler as BaseUnpickler
 from queue import Queue
 from typing import Any, Dict, Optional, Set
 
-from pod.common import (
-    Object,
-    ObjectId,
-    PodId,
-    TimeId,
-    make_pod_id,
-    object_id,
-    step_time_id,
-)
+from dill import Pickler as BasePickler
+from dill import Unpickler as BaseUnpickler
+
+from pod.common import Object, ObjectId, PodId, TimeId, make_pod_id, object_id, step_time_id
 from pod.storage import PodReader, PodStorage
+
+
+class PodPickling:
+    def dump(self, obj: Object) -> PodId:
+        raise NotImplementedError("Abstract method")
+
+    def load(self, pid: PodId) -> Object:
+        raise NotImplementedError("Abstract method")
+
+    def estimate_size(self) -> int:
+        raise NotImplementedError("Abstract method")
+
 
 """ Pickling one object per pod """
 
@@ -71,9 +76,7 @@ class IndividualPodPickler(BasePickler):
 
 
 class IndividualPodUnpickler(BaseUnpickler):
-    def __init__(
-        self, tid: TimeId, reader: PodReader, file: io.IOBase, *args, **kwargs
-    ) -> None:
+    def __init__(self, tid: TimeId, reader: PodReader, file: io.IOBase, *args, **kwargs) -> None:
         BaseUnpickler.__init__(self, file, *args, **kwargs)
         self.tid = tid
         self.reader = reader
@@ -91,9 +94,7 @@ class IndividualPodUnpickler(BaseUnpickler):
         )
 
     @staticmethod
-    def load_from_reader(
-        tid: TimeId, reader: PodReader, pid: PodId, *args, **kwargs
-    ) -> Object:
+    def load_from_reader(tid: TimeId, reader: PodReader, pid: PodId, *args, **kwargs) -> Object:
         with reader.read(pid) as obj_io:
             return IndividualPodUnpickler(
                 tid,
@@ -104,10 +105,8 @@ class IndividualPodUnpickler(BaseUnpickler):
             ).load()
 
 
-class IndividualPodPickling:
-    def __init__(
-        self, storage: PodStorage, pickle_kwargs: Dict[str, Any] = {}
-    ) -> None:
+class IndividualPodPickling(PodPickling):
+    def __init__(self, storage: PodStorage, pickle_kwargs: Dict[str, Any] = {}) -> None:
         self.storage = storage
         self.pickle_kwargs = pickle_kwargs
 
@@ -139,6 +138,9 @@ class IndividualPodPickling:
                 pid,
                 **self.pickle_kwargs,
             )
+
+    def estimate_size(self) -> int:
+        return self.storage.estimate_size()
 
 
 if __name__ == "__main__":
@@ -175,19 +177,13 @@ if __name__ == "__main__":
     namespace: dict = {"x": 1, "y": [2, shared_buf], "z": [3, shared_buf]}
     pid_1 = pod_pickling.dump(namespace)
     print(pid_1, pod_pickling.load(pid_1))
-    print(
-        f"Storage size: {pod_storage.estimate_size()}, "
-        f"raw pickle size: {len(pickle.dumps(namespace))}"
-    )
+    print(f"Storage size: {pod_storage.estimate_size()}, " f"raw pickle size: {len(pickle.dumps(namespace))}")
 
     # Namespace mutates.
     namespace["y"][0] = 22
     pid_2 = pod_pickling.dump(namespace)
     print(pid_2, pod_pickling.load(pid_2))
-    print(
-        f"Storage size: {pod_storage.estimate_size()}, "
-        f"raw pickle size: {len(pickle.dumps(namespace))}"
-    )
+    print(f"Storage size: {pod_storage.estimate_size()}, " f"raw pickle size: {len(pickle.dumps(namespace))}")
 
     # Visualize dependency graph.
     if isinstance(pod_storage, DictPodStorage):
