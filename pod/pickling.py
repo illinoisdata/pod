@@ -16,6 +16,36 @@ from pod.common import Object, ObjectId, PodId, TimeId, make_pod_id, object_id, 
 from pod.storage import PodReader, PodStorage
 
 
+# Inherit this class to cache loaded objects (e.g., for shared references).
+class PodUnpickler(BaseUnpickler):
+    def __init__(self, file: io.IOBase, *args, **kwargs) -> None:
+        BaseUnpickler.__init__(self, file, *args, **kwargs)
+        self.loaded_objs: dict = {}
+        self.args = args
+        self.kwargs = kwargs
+
+    def copy_new(self, file: io.IOBase) -> PodUnpickler:
+        new_self = self.clone_new(file)
+        self.copy_into(new_self)
+        return new_self
+
+    # Override this for new type
+    def clone_new(self, file: io.IOBase) -> PodUnpickler:
+        return PodUnpickler(file, *self.args, **self.kwargs)
+
+    # Override this to transfer new fields.
+    def copy_into(self, new_self: PodUnpickler):
+        new_self.loaded_objs = self.loaded_objs
+
+    def persistent_load(self, oid: ObjectId) -> Object:
+        if oid not in self.loaded_objs:
+            self.loaded_objs[oid] = self.pod_persistent_load(oid)
+        return self.loaded_objs[oid]
+
+    def pod_persistent_load(self, oid: ObjectId) -> Object:
+        raise NotImplementedError("Abstract method")
+
+
 class PodPickling:
     def dump(self, obj: Object) -> PodId:
         raise NotImplementedError("Abstract method")
@@ -75,23 +105,26 @@ class IndividualPodPickler(BasePickler):
         return self.root_deps
 
 
-class IndividualPodUnpickler(BaseUnpickler):
+class IndividualPodUnpickler(PodUnpickler):
     def __init__(self, tid: TimeId, reader: PodReader, file: io.IOBase, *args, **kwargs) -> None:
-        BaseUnpickler.__init__(self, file, *args, **kwargs)
+        PodUnpickler.__init__(self, file, *args, **kwargs)
         self.tid = tid
         self.reader = reader
         self.args = args
         self.kwargs = kwargs
 
-    def persistent_load(self, oid: ObjectId) -> Object:
+    def clone_new(self, file: io.IOBase) -> IndividualPodUnpickler:
+        return IndividualPodUnpickler(self.tid, self.reader, file, *self.args, **self.kwargs)
+
+    def copy_into(self, new_self: PodUnpickler):
+        PodUnpickler.copy_into(self, new_self)
+        new_self.tid = self.tid
+        new_self.reader = self.reader
+
+    def pod_persistent_load(self, oid: ObjectId) -> Object:
         # TODO: Load in topological order?
-        return IndividualPodUnpickler.load_from_reader(
-            self.tid,
-            self.reader,
-            make_pod_id(self.tid, oid),
-            *self.args,
-            **self.kwargs,
-        )
+        with self.reader.read(make_pod_id(self.tid, oid)) as obj_io:
+            return self.copy_new(obj_io).load()
 
     @staticmethod
     def load_from_reader(tid: TimeId, reader: PodReader, pid: PodId, *args, **kwargs) -> Object:
@@ -184,6 +217,11 @@ if __name__ == "__main__":
     pid_2 = pod_pickling.dump(namespace)
     print(pid_2, pod_pickling.load(pid_2))
     print(f"Storage size: {pod_storage.estimate_size()}, " f"raw pickle size: {len(pickle.dumps(namespace))}")
+
+    # Test mutating shared reference.
+    load_namespace = pod_pickling.load(pid_2)
+    load_namespace["y"][1].append("new item")
+    print(load_namespace)
 
     # Visualize dependency graph.
     if isinstance(pod_storage, DictPodStorage):
