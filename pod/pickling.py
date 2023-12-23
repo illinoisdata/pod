@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from queue import Queue
 from typing import Any, Dict, Optional, Set
 
+import dill as pickle
 from dill import Pickler as BasePickler
 from dill import Unpickler as BaseUnpickler
 
@@ -55,6 +56,32 @@ class PodPickling:
 
     def estimate_size(self) -> int:
         raise NotImplementedError("Abstract method")
+
+
+""" Snapshot: pickling object as a whole """
+
+
+class SnapshotPodPickling(PodPickling):
+    def __init__(self, root_dir: Path) -> None:
+        self.root_dir = root_dir
+        self.root_dir.mkdir(parents=True, exist_ok=True)
+
+    def dump(self, obj: Object) -> PodId:
+        tid = step_time_id()
+        pid = make_pod_id(tid, object_id(obj))
+        with open(self.pickle_path(pid), "wb") as f:
+            pickle.dump(obj, f)
+        return pid
+
+    def load(self, pid: PodId) -> Object:
+        with open(self.pickle_path(pid), "rb") as f:
+            return pickle.load(f)
+
+    def estimate_size(self) -> int:
+        return sum(f.stat().st_size for f in self.root_dir.glob("**/*") if f.is_file())
+
+    def pickle_path(self, pid: PodId) -> Path:
+        return self.root_dir / f"{pid.tid}_{pid.oid}.pkl"
 
 
 """ Pickling one object per pod """
@@ -177,7 +204,6 @@ class IndividualPodPickling(PodPickling):
 
 
 if __name__ == "__main__":
-    import pickle
     import tempfile
     from pathlib import Path
 
