@@ -14,7 +14,7 @@ from dataclasses_json import dataclass_json
 from loguru import logger
 
 from pod.common import PodId
-from pod.pickling import IndividualPodPickling, PodPickling
+from pod.pickling import IndividualPodPickling, PodPickling, SnapshotPodPickling
 from pod.storage import DictPodStorage, FilePodStorage
 
 """ Parameters """
@@ -258,7 +258,10 @@ class SUT:
     def sut(args: BenchArgs) -> PodPickling:
         if args.sut == "inmem_dict":
             return IndividualPodPickling(DictPodStorage())
-        elif args.sut == "pod_file":
+        if args.sut == "snapshot":
+            assert args.pod_dir is not None, "snapshot requires --pod_dir"
+            return SnapshotPodPickling(args.pod_dir)
+        if args.sut == "pod_file":
             assert args.pod_dir is not None, "pod_file requires --pod_dir"
             return IndividualPodPickling(FilePodStorage(args.pod_dir))
         raise ValueError(f'Invalid SUT name "{args.sut}"')
