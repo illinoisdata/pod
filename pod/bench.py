@@ -144,6 +144,19 @@ class ExpStat:
         logger.info(f"{len(self.dumps)} dumps" f", avgt= {strf_deltatime(dump_avg_t_s)} ({strf_throughput(1.0/dump_avg_t_s)})")
         logger.info(f"{len(self.loads)} loads" f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})")
 
+    def save(self, save_dir: Path) -> Path:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        result_path = save_dir / "expstat.json"
+        with open(result_path, "w") as f:
+            f.write(self.to_json())  # type: ignore
+        return result_path
+
+    @staticmethod
+    def load(save_dir: Path) -> ExpStat:
+        result_path = save_dir / "expstat.json"
+        with open(result_path, "r") as f:
+            return ExpStat.from_json(f.read())  # type: ignore
+
 
 """ Notebook handler/executor """
 
@@ -319,11 +332,7 @@ def run_exp1(argv: List[str]) -> None:
     expstat.summary()
 
     # Write results
-    result_dir = args.result_dir / args.expname
-    result_dir.mkdir(parents=True, exist_ok=True)
-    result_path = result_dir / "expstat.json"
-    with open(result_path, "w") as f:
-        f.write(expstat.to_json())  # type: ignore
+    result_path = expstat.save(args.result_dir / args.expname)
     logger.info(f"Saved ExpStat to {result_path}")
 
 
