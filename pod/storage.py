@@ -433,10 +433,23 @@ class PostgreSQLPodStorageWriter(PodWriter):
         dep_pids: Set[PodId],  # List of pids this pod depends on.
     ) -> None:
         with self.storage.db_conn.cursor() as cursor:
-            cursor.execute("DELETE FROM pod_dependencies WHERE pod_id_tid = %s AND pod_id_oid = %s;", (pod_id.tid, pod_id.oid))
-            for dep_pid in dep_pids:
-                cursor.execute("INSERT INTO pod_dependencies (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid) VALUES (%s, %s, %s, %s);", (pod_id.tid, pod_id.oid, dep_pid.tid, dep_pid.oid))
+            # DELETE operation
+            delete_query = "DELETE FROM pod_dependencies WHERE pod_id_tid = %s AND pod_id_oid = %s"
+
+            # Preparing values for INSERT operation
+            values = [(pod_id.tid, pod_id.oid, dep_pid.tid, dep_pid.oid) for dep_pid in dep_pids]
+            if values:
+                args_str = ','.join(cursor.mogrify("(%s,%s,%s,%s)", x).decode("utf-8") for x in values)
+                insert_query = "INSERT INTO pod_dependencies (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid) VALUES " + args_str
+
+                # Combining DELETE and INSERT into a single query using CTE
+                combined_query = f"WITH deleted AS ({delete_query}) {insert_query}"
+
+                # Execute the combined query
+                cursor.execute(combined_query, (pod_id.tid, pod_id.oid))
+
         self.storage.db_conn.commit()
+
 
 class PostgreSQLPodStorageReader(PodReader):
     def __init__(self, storage: PostgreSQLPodStorage) -> None:
@@ -445,7 +458,10 @@ class PostgreSQLPodStorageReader(PodReader):
     def read(self, pod_id: PodId) -> io.IOBase:
         with self.storage.db_conn.cursor() as cursor:
             cursor.execute("SELECT pod_bytes FROM pod_storage WHERE tid = %s AND oid = %s", (pod_id.tid, pod_id.oid))
-            pod_bytes = cursor.fetchone()[0]
+            result = cursor.fetchone()
+            if result is None:
+                raise ValueError("No data found for the given pod_id")
+            pod_bytes = result[0]
         return io.BytesIO(pod_bytes)
 
 
@@ -464,8 +480,6 @@ class PostgreSQLPodStorage(PodStorage):
                     pod_bytes BYTEA,
                     PRIMARY KEY (tid, oid)
                 );
-            """)
-            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pod_dependencies (
                     pod_id_tid BIGINT,
                     pod_id_oid BIGINT,
