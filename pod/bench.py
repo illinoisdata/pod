@@ -14,7 +14,7 @@ from dataclasses_json import dataclass_json
 from loguru import logger
 
 from pod.common import PodId
-from pod.pickling import IndividualPodPickling, PodPickling
+from pod.pickling import IndividualPodPickling, PodPickling, SnapshotPodPickling
 from pod.storage import DictPodStorage, FilePodStorage
 
 """ Parameters """
@@ -144,6 +144,19 @@ class ExpStat:
         logger.info(f"{len(self.dumps)} dumps" f", avgt= {strf_deltatime(dump_avg_t_s)} ({strf_throughput(1.0/dump_avg_t_s)})")
         logger.info(f"{len(self.loads)} loads" f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})")
 
+    def save(self, save_dir: Path) -> Path:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        result_path = save_dir / "expstat.json"
+        with open(result_path, "w") as f:
+            f.write(self.to_json())  # type: ignore
+        return result_path
+
+    @staticmethod
+    def load(save_dir: Path) -> ExpStat:
+        result_path = save_dir / "expstat.json"
+        with open(result_path, "r") as f:
+            return ExpStat.from_json(f.read())  # type: ignore
+
 
 """ Notebook handler/executor """
 
@@ -258,7 +271,10 @@ class SUT:
     def sut(args: BenchArgs) -> PodPickling:
         if args.sut == "inmem_dict":
             return IndividualPodPickling(DictPodStorage())
-        elif args.sut == "pod_file":
+        if args.sut == "snapshot":
+            assert args.pod_dir is not None, "snapshot requires --pod_dir"
+            return SnapshotPodPickling(args.pod_dir)
+        if args.sut == "pod_file":
             assert args.pod_dir is not None, "pod_file requires --pod_dir"
             return IndividualPodPickling(FilePodStorage(args.pod_dir))
         raise ValueError(f'Invalid SUT name "{args.sut}"')
@@ -316,11 +332,7 @@ def run_exp1(argv: List[str]) -> None:
     expstat.summary()
 
     # Write results
-    result_dir = args.result_dir / args.expname
-    result_dir.mkdir(parents=True, exist_ok=True)
-    result_path = result_dir / "expstat.json"
-    with open(result_path, "w") as f:
-        f.write(expstat.to_json())  # type: ignore
+    result_path = expstat.save(args.result_dir / args.expname)
     logger.info(f"Saved ExpStat to {result_path}")
 
 

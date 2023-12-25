@@ -9,11 +9,42 @@ from dataclasses import dataclass
 from queue import Queue
 from typing import Any, Dict, Optional, Set
 
+import dill as pickle
 from dill import Pickler as BasePickler
 from dill import Unpickler as BaseUnpickler
 
 from pod.common import Object, ObjectId, PodId, TimeId, make_pod_id, object_id, step_time_id
 from pod.storage import PodReader, PodStorage
+
+
+# Inherit this class to cache loaded objects (e.g., for shared references).
+class PodUnpickler(BaseUnpickler):
+    def __init__(self, file: io.IOBase, *args, **kwargs) -> None:
+        BaseUnpickler.__init__(self, file, *args, **kwargs)
+        self.loaded_objs: dict = {}
+        self.args = args
+        self.kwargs = kwargs
+
+    def copy_new(self, file: io.IOBase) -> PodUnpickler:
+        new_self = self.clone_new(file)
+        self.copy_into(new_self)
+        return new_self
+
+    # Override this for new type
+    def clone_new(self, file: io.IOBase) -> PodUnpickler:
+        return PodUnpickler(file, *self.args, **self.kwargs)
+
+    # Override this to transfer new fields.
+    def copy_into(self, new_self: PodUnpickler):
+        new_self.loaded_objs = self.loaded_objs
+
+    def persistent_load(self, oid: ObjectId) -> Object:
+        if oid not in self.loaded_objs:
+            self.loaded_objs[oid] = self.pod_persistent_load(oid)
+        return self.loaded_objs[oid]
+
+    def pod_persistent_load(self, oid: ObjectId) -> Object:
+        raise NotImplementedError("Abstract method")
 
 
 class PodPickling:
@@ -25,6 +56,32 @@ class PodPickling:
 
     def estimate_size(self) -> int:
         raise NotImplementedError("Abstract method")
+
+
+""" Snapshot: pickling object as a whole """
+
+
+class SnapshotPodPickling(PodPickling):
+    def __init__(self, root_dir: Path) -> None:
+        self.root_dir = root_dir
+        self.root_dir.mkdir(parents=True, exist_ok=True)
+
+    def dump(self, obj: Object) -> PodId:
+        tid = step_time_id()
+        pid = make_pod_id(tid, object_id(obj))
+        with open(self.pickle_path(pid), "wb") as f:
+            pickle.dump(obj, f)
+        return pid
+
+    def load(self, pid: PodId) -> Object:
+        with open(self.pickle_path(pid), "rb") as f:
+            return pickle.load(f)
+
+    def estimate_size(self) -> int:
+        return sum(f.stat().st_size for f in self.root_dir.glob("**/*") if f.is_file())
+
+    def pickle_path(self, pid: PodId) -> Path:
+        return self.root_dir / f"{pid.tid}_{pid.oid}.pkl"
 
 
 """ Pickling one object per pod """
@@ -75,23 +132,26 @@ class IndividualPodPickler(BasePickler):
         return self.root_deps
 
 
-class IndividualPodUnpickler(BaseUnpickler):
+class IndividualPodUnpickler(PodUnpickler):
     def __init__(self, tid: TimeId, reader: PodReader, file: io.IOBase, *args, **kwargs) -> None:
-        BaseUnpickler.__init__(self, file, *args, **kwargs)
+        PodUnpickler.__init__(self, file, *args, **kwargs)
         self.tid = tid
         self.reader = reader
         self.args = args
         self.kwargs = kwargs
 
-    def persistent_load(self, oid: ObjectId) -> Object:
+    def clone_new(self, file: io.IOBase) -> IndividualPodUnpickler:
+        return IndividualPodUnpickler(self.tid, self.reader, file, *self.args, **self.kwargs)
+
+    def copy_into(self, new_self: PodUnpickler):
+        PodUnpickler.copy_into(self, new_self)
+        new_self.tid = self.tid
+        new_self.reader = self.reader
+
+    def pod_persistent_load(self, oid: ObjectId) -> Object:
         # TODO: Load in topological order?
-        return IndividualPodUnpickler.load_from_reader(
-            self.tid,
-            self.reader,
-            make_pod_id(self.tid, oid),
-            *self.args,
-            **self.kwargs,
-        )
+        with self.reader.read(make_pod_id(self.tid, oid)) as obj_io:
+            return self.copy_new(obj_io).load()
 
     @staticmethod
     def load_from_reader(tid: TimeId, reader: PodReader, pid: PodId, *args, **kwargs) -> Object:
@@ -153,7 +213,6 @@ class IndividualPodPickling(PodPickling):
 
 
 if __name__ == "__main__":
-    import pickle
     import tempfile
     from pathlib import Path
 
@@ -195,6 +254,11 @@ if __name__ == "__main__":
     pid_2 = pod_pickling.dump(namespace)
     print(pid_2, pod_pickling.load(pid_2))
     print(f"Storage size: {pod_storage.estimate_size()}, " f"raw pickle size: {len(pickle.dumps(namespace))}")
+
+    # Test mutating shared reference.
+    load_namespace = pod_pickling.load(pid_2)
+    load_namespace["y"][1].append("new item")
+    print(load_namespace)
 
     # Visualize dependency graph.
     if isinstance(pod_storage, DictPodStorage):
