@@ -7,7 +7,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 from queue import Queue
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Tuple, Optional, Set
 
 import dill as pickle
 from dill import Pickler as BasePickler
@@ -174,7 +174,7 @@ class IndividualPodPickling(PodPickling):
         tid = step_time_id()
         pid = make_pod_id(tid, object_id(obj))
         ctx = IndividualPodPicklerContext.new(obj)
-        dependency_maps = {}
+        dependency_maps: Dict[Tuple, Set] = {}
         with self.storage.writer() as writer:
             while not ctx.obj_queue.empty():
                 this_obj = ctx.obj_queue.get()
@@ -196,7 +196,7 @@ class IndividualPodPickling(PodPickling):
                 oid, tid = pid_info
                 pod_id = make_pod_id(tid, oid)
                 writer.write_dep(pod_id, deps)
-        
+
         return pid
 
     def load(self, pid: PodId) -> Object:
