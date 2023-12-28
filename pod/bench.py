@@ -15,7 +15,7 @@ from loguru import logger
 
 from pod.common import PodId
 from pod.pickling import IndividualPodPickling, PodPickling, SnapshotPodPickling
-from pod.storage import DictPodStorage, FilePodStorage
+from pod.storage import DictPodStorage, FilePodStorage, PostgreSQLPodStorage
 
 """ Parameters """
 
@@ -277,6 +277,8 @@ class SUT:
         if args.sut == "pod_file":
             assert args.pod_dir is not None, "pod_file requires --pod_dir"
             return IndividualPodPickling(FilePodStorage(args.pod_dir))
+        elif args.sut == "postgres":
+            return IndividualPodPickling(PostgreSQLPodStorage("localhost", 5432))
         raise ValueError(f'Invalid SUT name "{args.sut}"')
 
 

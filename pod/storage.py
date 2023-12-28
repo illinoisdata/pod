@@ -8,8 +8,9 @@ import io
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Tuple
 
+import psycopg2
 from dataclasses_json import dataclass_json
 
 from pod.common import PodId
@@ -327,3 +328,171 @@ class FilePodStorage(PodStorage):
 
     def is_init(self) -> bool:
         return self.stats_path().exists() and self.index_path().exists()
+
+
+""" PostgreSQL storage: each pod as an entry in a database """
+
+
+class PostgreSQLPodStorageWriter(PodWriter):
+    def __init__(self, storage: PostgreSQLPodStorage) -> None:
+        self.storage = storage
+        self.storage_buffer: List[Tuple] = []
+        self.dependency_map: Dict[Tuple, Set[Tuple]] = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            self.storage.db_conn.rollback()
+        else:
+            self.flush_storage()
+            self.flush_dependencies()
+            self.storage.db_conn.commit()
+
+    def flush_storage(self):
+        with self.storage.db_conn.cursor() as cursor:
+            cursor.executemany(
+                """
+                INSERT INTO pod_storage (tid, oid, pod_bytes)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (tid, oid) DO UPDATE SET pod_bytes = EXCLUDED.pod_bytes
+                """,
+                self.storage_buffer,
+            )
+        self.storage_buffer = []
+
+    def flush_dependencies(self):
+        with self.storage.db_conn.cursor() as cursor:
+            # Aggregating all new dependencies
+            all_new_deps = set()
+            for pid, deps in self.dependency_map.items():
+                all_new_deps.update(((pid[0], pid[1], d[0], d[1]) for d in deps))
+
+            # Format the all_new_deps for delete query
+            delete_values = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x).decode() for x in all_new_deps)
+            if delete_values:
+                delete_query = f"""
+                    DELETE FROM pod_dependencies
+                    WHERE (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid) NOT IN (VALUES {delete_values})
+                """
+                cursor.execute(delete_query)
+
+            # Constructing insert query
+            insert_values = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x).decode() for x in all_new_deps)
+            if insert_values:
+                insert_query = f"""
+                    INSERT INTO pod_dependencies (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid)
+                    VALUES {insert_values}
+                    ON CONFLICT DO NOTHING
+                """
+                cursor.execute(insert_query)
+        self.dependency_map = {}
+
+    def write_pod(
+        self,
+        pod_id: PodId,
+        pod_bytes: bytes,
+    ) -> None:
+        self.storage_buffer.append((pod_id.tid, pod_id.oid, pod_bytes))
+
+    def write_dep(
+        self,
+        pod_id: PodId,
+        dep_pids: Set[PodId],  # List of pids this pod depends on.
+    ) -> None:
+        if (pod_id.tid, pod_id.oid) not in self.dependency_map:
+            self.dependency_map[(pod_id.tid, pod_id.oid)] = set()
+        self.dependency_map[(pod_id.tid, pod_id.oid)].update((p.tid, p.oid) for p in dep_pids)
+
+
+class PostgreSQLPodStorageReader(PodReader):
+    def __init__(self, storage: PostgreSQLPodStorage) -> None:
+        self.storage = storage
+
+    def read(self, pod_id: PodId) -> io.IOBase:
+        if (pod_id.tid, pod_id.oid) in self.storage.cache:
+            return self.storage.cache[(pod_id.tid, pod_id.oid)]
+        with self.storage.db_conn.cursor() as cursor:
+            cursor.execute("SELECT pod_bytes FROM pod_storage WHERE tid = %s AND oid = %s", (pod_id.tid, pod_id.oid))
+            result = cursor.fetchone()
+            if result is None:
+                raise ValueError("No data found for the given pod_id")
+            pod_bytes = result[0]
+        return io.BytesIO(pod_bytes)
+
+
+class PostgreSQLPodStorage(PodStorage):
+    def __init__(self, host: str, port: int) -> None:
+        try:
+            self.db_conn = psycopg2.connect(dbname="postgres", user="postgres", host=host, port=port)
+        except psycopg2.OperationalError as e:
+            print(f"Error connecting to the database: {e}")
+            raise
+        self.cache: Dict[Tuple, io.BytesIO] = {}
+        with self.db_conn.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pod_storage (
+                    tid BIGINT,
+                    oid BIGINT,
+                    pod_bytes BYTEA,
+                    PRIMARY KEY (tid, oid)
+                );
+                CREATE TABLE IF NOT EXISTS pod_dependencies (
+                    pod_id_tid BIGINT,
+                    pod_id_oid BIGINT,
+                    dep_pid_tid BIGINT,
+                    dep_pid_oid BIGINT,
+                    PRIMARY KEY (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid),
+                    FOREIGN KEY (pod_id_tid, pod_id_oid) REFERENCES pod_storage(tid, oid),
+                    FOREIGN KEY (dep_pid_tid, dep_pid_oid) REFERENCES pod_storage(tid, oid)
+                );
+            """
+            )
+            self.db_conn.commit()
+
+    def writer(self) -> PodWriter:
+        return PostgreSQLPodStorageWriter(self)
+
+    def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
+        hint_tid_oid_tup = tuple([(p.tid, p.oid) for p in hint_pod_ids])
+        with self.db_conn.cursor() as cursor:
+            query = """
+            WITH RECURSIVE dependency_chain AS (
+                SELECT pd.dep_pid_tid AS tid, pd.dep_pid_oid AS oid
+                FROM pod_dependencies pd
+                WHERE (pd.pod_id_tid, pd.pod_id_oid) IN %s
+                UNION ALL
+                SELECT pd.dep_pid_tid, pd.dep_pid_oid
+                FROM pod_dependencies pd
+                INNER JOIN dependency_chain dc ON pd.pod_id_tid = dc.tid AND pd.pod_id_oid = dc.oid
+            )
+            SELECT ps.tid, ps.oid, ps.pod_bytes
+            FROM (
+                SELECT tid, oid FROM dependency_chain
+                UNION
+                SELECT tid, oid FROM pod_storage WHERE (tid, oid) IN %s
+            ) AS combined
+            INNER JOIN pod_storage ps ON combined.tid = ps.tid AND combined.oid = ps.oid;
+            """
+            cursor.execute(query, (hint_tid_oid_tup, hint_tid_oid_tup))
+            results = cursor.fetchall()
+            for row in results:
+                tid, oid, pod_bytes = row
+                self.cache[(tid, oid)] = io.BytesIO(pod_bytes)
+        return PostgreSQLPodStorageReader(self)
+
+    def estimate_size(self) -> int:
+        with self.db_conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT pg_total_relation_size('pod_dependencies') + pg_total_relation_size('pod_storage')
+                           AS total_size;
+            """
+            )
+            size = cursor.fetchone()[0]
+        return size
+
+    def __del__(self):
+        self.db_conn.close()
