@@ -352,14 +352,13 @@ class PostgreSQLPodStorageWriter(PodWriter):
 
     def flush_storage(self):
         with self.storage.db_conn.cursor() as cursor:
-            cursor.executemany(
-                """
+            values_str = ",".join(cursor.mogrify("(%s, %s, %s)", x).decode() for x in self.storage_buffer)
+            query = f"""
                 INSERT INTO pod_storage (tid, oid, pod_bytes)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (tid, oid) DO UPDATE SET pod_bytes = EXCLUDED.pod_bytes
-                """,
-                self.storage_buffer,
-            )
+                VALUES {values_str}
+                ON CONFLICT (tid, oid) DO UPDATE SET pod_bytes = EXCLUDED.pod_bytes;
+            """
+            cursor.execute(query)
         self.storage_buffer = []
 
     def flush_dependencies(self):

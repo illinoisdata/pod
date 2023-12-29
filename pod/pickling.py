@@ -7,7 +7,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 from queue import Queue
-from typing import Any, Dict, Tuple, Optional, Set
+from typing import Any, Dict, Optional, Set, Tuple
 
 import dill as pickle
 from dill import Pickler as BasePickler
