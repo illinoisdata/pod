@@ -13,6 +13,9 @@ class PodId:
     tid: TimeId
     oid: ObjectId
 
+    def __reduce__(self):
+        return self.__class__, (self.tid, self.oid)
+
 
 _current_tid = 0
 

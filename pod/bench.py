@@ -349,5 +349,5 @@ if __name__ == "__main__":
     if sys.argv[1] == "exp1":
         run_exp1(sys.argv[2:])
     else:
-        logger.error(f'Unknown experiment "{sys.argv[0]}"')
+        logger.error(f'Unknown experiment "{sys.argv[1]}"')
         sys.exit(1)
