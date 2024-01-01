@@ -49,10 +49,14 @@ watch:            ## Run tests on every change.
 
 .PHONY: clean
 clean:            ## Clean unused files.
-	@find ./ -name '*.pyc' -exec rm -f {} \;
-	@find ./ -name '__pycache__' -exec rm -rf {} \;
-	@find ./ -name 'Thumbs.db' -exec rm -f {} \;
-	@find ./ -name '*~' -exec rm -f {} \;
+	@find ./pod -name '*.pyc' -exec rm -f {} \;
+	@find ./pod -d -name '__pycache__' -exec rm -rf {} \;
+	@find ./pod -name 'Thumbs.db' -exec rm -f {} \;
+	@find ./pod -name '*~' -exec rm -f {} \;
+	@find ./tests -name '*.pyc' -exec rm -f {} \;
+	@find ./tests -d -name '__pycache__' -exec rm -rf {} \;
+	@find ./tests -name 'Thumbs.db' -exec rm -f {} \;
+	@find ./tests -name '*~' -exec rm -f {} \;
 	@rm -rf .cache
 	@rm -rf .pytest_cache
 	@rm -rf .mypy_cache
