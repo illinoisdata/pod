@@ -40,8 +40,8 @@ class BenchArgs:
 
     """ Random mutating list """
     rmlist_num_cells: int = 5  # Number of cells.
-    rmlist_list_size: int = 100  # Number of elements in the list
-    rmlist_elem_size: int = 10  # Size of each element in the list.
+    rmlist_list_size: int = 1000  # Number of elements in the list
+    rmlist_elem_size: int = 1000  # Size of each element in the list.
     rmlist_num_elem_mutate: int = 10  # Number of elements mutating in each cell.
 
     """ Pod storage """
@@ -141,7 +141,11 @@ class ExpStat:
     def summary(self) -> None:
         dump_avg_t_s = self.dump_sum_t_s / len(self.dumps)
         load_avg_t_s = self.load_sum_t_s / len(self.loads)
-        logger.info(f"{len(self.dumps)} dumps" f", avgt= {strf_deltatime(dump_avg_t_s)} ({strf_throughput(1.0/dump_avg_t_s)})")
+        logger.info(
+            f"{len(self.dumps)} dumps"
+            f", avgt= {strf_deltatime(dump_avg_t_s)} ({strf_throughput(1.0/dump_avg_t_s)}), "
+            f"s= {strf_storage(self.dumps[-1].storage_b)}"
+        )
         logger.info(f"{len(self.loads)} loads" f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})")
 
     def save(self, save_dir: Path) -> Path:
@@ -213,11 +217,9 @@ class RandomMutatingListCells(NotebookCells):
         if idx == 0:
             # First cell, declare an empty list.
             return (
-                "def f():\n"
-                "  return None\n"
                 "import random\n"
                 "l = [\n"
-                f"  random.choices(range(2), k={self.elem_size})\n"
+                f"  [str(random.choices(range(2), k={self.elem_size}))]\n"
                 f"  for _ in range({self.list_size})\n"
                 "]"
             )
@@ -225,7 +227,7 @@ class RandomMutatingListCells(NotebookCells):
         # Mutate elements randomly.
         return (
             f"for idx in random.sample(range(len(l)), {self.num_elem_mutate}):\n"
-            f"  l[idx] = random.choices(range(2), k={self.elem_size})"
+            f"  l[idx][0] = str(random.choices(range(2), k={self.elem_size}))"
         )
 
     def __len__(self) -> int:
