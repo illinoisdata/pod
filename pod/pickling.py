@@ -8,7 +8,7 @@ import io
 from dataclasses import dataclass
 from queue import Queue
 from types import FunctionType
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set
 
 import dill as pickle
 from dill import Pickler as BasePickler
@@ -180,7 +180,7 @@ class IndividualPodPickling(PodPickling):
         tid = step_time_id()
         pid = make_pod_id(tid, object_id(obj))
         ctx = IndividualPodPicklerContext.new(obj)
-        dependency_maps: Dict[Tuple, Set] = {}
+        dependency_maps: Dict[PodId, Set] = {}
         with self.storage.writer() as writer:
             while not ctx.obj_queue.empty():
                 this_obj = ctx.obj_queue.get()
@@ -194,14 +194,10 @@ class IndividualPodPickling(PodPickling):
                     **self.pickle_kwargs,
                 )
                 this_pickler.dump(this_obj)
-                if (this_pid.oid, this_pid.tid) not in dependency_maps:
-                    dependency_maps[(this_pid.oid, this_pid.tid)] = set()
-                writer.write_pod(this_pid, this_buffer.getvalue())
-                for item in this_pickler.get_root_deps():
-                    dependency_maps[(this_pid.oid, this_pid.tid)].add(item)
-            for pid_info, deps in dependency_maps.items():
-                oid, tid = pid_info
-                pod_id = make_pod_id(tid, oid)
+                this_pod_bytes = this_buffer.getvalue()
+                writer.write_pod(this_pid, this_pod_bytes)
+                dependency_maps[this_pid] = this_pickler.get_root_deps()
+            for pod_id, deps in dependency_maps.items():
                 writer.write_dep(pod_id, deps)
 
         return pid
