@@ -217,11 +217,11 @@ if __name__ == "__main__":
     from pathlib import Path
 
     from pod.common import plot_deps
-    from pod.storage import DictPodStorage, FilePodStorage, PostgreSQLPodStorage
+    from pod.storage import DictPodStorage, FilePodStorage, PostgreSQLPodStorage, RedisPodStorage
 
     # Initialize storage
     # storage_mode = "dict"
-    storage_mode = "postgres"
+    storage_mode = "redis"
     pod_storage: Optional[PodStorage] = None
     if storage_mode == "dict":
         pod_storage = DictPodStorage()
@@ -232,6 +232,8 @@ if __name__ == "__main__":
         pod_storage = FilePodStorage(root_dir)
     elif storage_mode == "postgres":
         pod_storage = PostgreSQLPodStorage("localhost", 5432)
+    elif storage_mode == "redis":
+        pod_storage = RedisPodStorage("localhost", 6379)
     else:
         raise ValueError(f"Invalid storage_mode= {storage_mode}")
 

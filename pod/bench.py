@@ -15,7 +15,7 @@ from loguru import logger
 
 from pod.common import PodId
 from pod.pickling import IndividualPodPickling, PodPickling, SnapshotPodPickling
-from pod.storage import DictPodStorage, FilePodStorage, PostgreSQLPodStorage
+from pod.storage import DictPodStorage, FilePodStorage, PostgreSQLPodStorage, RedisPodStorage
 
 """ Parameters """
 
@@ -271,14 +271,16 @@ class SUT:
     def sut(args: BenchArgs) -> PodPickling:
         if args.sut == "inmem_dict":
             return IndividualPodPickling(DictPodStorage())
-        if args.sut == "snapshot":
+        elif args.sut == "snapshot":
             assert args.pod_dir is not None, "snapshot requires --pod_dir"
             return SnapshotPodPickling(args.pod_dir)
-        if args.sut == "pod_file":
+        elif args.sut == "pod_file":
             assert args.pod_dir is not None, "pod_file requires --pod_dir"
             return IndividualPodPickling(FilePodStorage(args.pod_dir))
         elif args.sut == "postgres":
             return IndividualPodPickling(PostgreSQLPodStorage("localhost", 5432))
+        elif args.sut == "redis":
+            return IndividualPodPickling(RedisPodStorage("localhost", 6379))
         raise ValueError(f'Invalid SUT name "{args.sut}"')
 
 
