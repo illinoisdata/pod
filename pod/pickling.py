@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 from queue import Queue
+from types import FunctionType
 from typing import Any, Dict, Optional, Set, Tuple
 
 import dill as pickle
@@ -106,6 +107,7 @@ class IndividualPodPicklerContext:
 class IndividualPodPickler(BasePickler):
     def __init__(
         self,
+        root_obj: Object,
         root_pid: PodId,
         ctx: IndividualPodPicklerContext,
         file: io.IOBase,
@@ -113,11 +115,15 @@ class IndividualPodPickler(BasePickler):
         **kwargs,
     ) -> None:
         BasePickler.__init__(self, file, *args, **kwargs)
+        self.root_obj = root_obj
         self.root_pid = root_pid
         self.root_deps: Set[PodId] = set()
         self.ctx = ctx
 
     def persistent_id(self, obj: Object) -> Optional[ObjectId]:
+        if isinstance(self.root_obj, FunctionType):
+            # Don't decompose function object into many pods, due to dill's assumption in save_function.
+            return None
         oid = object_id(obj)
         pid = make_pod_id(self.root_pid.tid, oid)
         if pid == self.root_pid:
@@ -181,6 +187,7 @@ class IndividualPodPickling(PodPickling):
                 this_pid = make_pod_id(tid, object_id(this_obj))
                 this_buffer = io.BytesIO()
                 this_pickler = IndividualPodPickler(
+                    this_obj,
                     this_pid,
                     ctx,
                     this_buffer,

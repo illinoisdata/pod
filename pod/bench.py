@@ -213,6 +213,8 @@ class RandomMutatingListCells(NotebookCells):
         if idx == 0:
             # First cell, declare an empty list.
             return (
+                "def f():\n"
+                "  return None\n"
                 "import random\n"
                 "l = [\n"
                 f"  random.choices(range(2), k={self.elem_size})\n"
