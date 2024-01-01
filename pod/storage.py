@@ -8,9 +8,10 @@ import io
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple, cast
 
 import psycopg2
+import redis
 from dataclasses_json import dataclass_json
 
 from pod.common import PodId
@@ -495,3 +496,79 @@ class PostgreSQLPodStorage(PodStorage):
 
     def __del__(self):
         self.db_conn.close()
+
+
+""" Redis storage """
+
+
+def serialize_pod_id(pod_id: PodId) -> bytes:
+    return pickle.dumps(pod_id)
+
+
+def deserialize_pod_id(serialized_pod_id: bytes) -> PodId:
+    pid = pickle.loads(serialized_pod_id)
+    return pid
+
+
+class RedisPodStorageWriter(PodWriter):
+    def __init__(self, storage: RedisPodStorage) -> None:
+        self.storage = storage
+        self.pod_data: Dict[bytes, bytes] = {}
+        self.dependency_map: Dict[bytes, Set[bytes]] = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.flush_data()
+
+    def flush_data(self):
+        with self.storage.redis_client.pipeline() as pipe:
+            for serialized_pod_id, bytes in self.pod_data.items():
+                pipe.set(f"pod_bytes:{serialized_pod_id}", bytes)
+                if serialized_pod_id in self.dependency_map:
+                    serialized_dep_pids = self.dependency_map[serialized_pod_id]
+                    if serialized_dep_pids:
+                        pipe.sadd(f"dep_pids:{serialized_pod_id}", *serialized_dep_pids)
+            pipe.execute()
+        self.dependency_map = {}
+
+    def write_pod(self, pod_id: PodId, pod_bytes: bytes) -> None:
+        serialized_pod_id = serialize_pod_id(pod_id)
+        self.pod_data[serialized_pod_id] = pod_bytes
+
+    def write_dep(self, pod_id: PodId, dep_pids: Set[PodId]) -> None:
+        serialized_pod_id = serialize_pod_id(pod_id)
+        serialized_dep_pids = {serialize_pod_id(pid) for pid in dep_pids}
+        self.dependency_map[serialized_pod_id] = serialized_dep_pids
+
+
+class RedisPodStorageReader(PodReader):
+    def __init__(self, storage: RedisPodStorage) -> None:
+        self.storage = storage
+
+    def read(self, pod_id: PodId) -> io.IOBase:
+        serialized_pod_id = serialize_pod_id(pod_id)
+        pod_bytes = self.storage.redis_client.get(f"pod_bytes:{serialized_pod_id!r}")
+        pod_bytes = cast(bytes, pod_bytes)
+        if pod_bytes is None:
+            raise KeyError(f"Data not found for Pod ID: {pod_id}")
+        return io.BytesIO(pod_bytes)
+
+
+class RedisPodStorage(PodStorage):
+    def __init__(self, host: str, port: int) -> None:
+        self.redis_client = redis.Redis(host=host, port=port)
+
+    def writer(self) -> PodWriter:
+        return RedisPodStorageWriter(self)
+
+    def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
+        return RedisPodStorageReader(self)
+
+    def estimate_size(self) -> int:
+        memory_data = self.redis_client.info("memory")
+        if memory_data is None:
+            raise RuntimeError("Error estimating size")
+        memory_data = cast(Dict[str, Any], memory_data)
+        return memory_data["used_memory"]
