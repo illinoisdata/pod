@@ -41,7 +41,7 @@ class BenchArgs:
     """ Random mutating list """
     rmlist_num_cells: int = 5  # Number of cells.
     rmlist_list_size: int = 1000  # Number of elements in the list
-    rmlist_elem_size: int = 1000  # Size of each element in the list.
+    rmlist_elem_size: int = 100000  # Size of each element in the list.
     rmlist_num_elem_mutate: int = 10  # Number of elements mutating in each cell.
 
     """ Pod storage """
@@ -217,17 +217,18 @@ class RandomMutatingListCells(NotebookCells):
         if idx == 0:
             # First cell, declare an empty list.
             return (
+                "import secrets\n"
                 "import random\n"
                 "l = [\n"
-                f"  [str(random.choices(range(2), k={self.elem_size}))]\n"
-                f"  for _ in range({self.list_size})\n"
+                f"  secrets.token_bytes({self.elem_size})\n"
+                f"  for idx in range({self.list_size})\n"
                 "]"
             )
 
         # Mutate elements randomly.
         return (
             f"for idx in random.sample(range(len(l)), {self.num_elem_mutate}):\n"
-            f"  l[idx][0] = str(random.choices(range(2), k={self.elem_size}))"
+            f"  l[idx] = secrets.token_bytes({self.elem_size})"
         )
 
     def __len__(self) -> int:

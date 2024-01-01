@@ -105,6 +105,8 @@ class IndividualPodPicklerContext:
 
 
 class IndividualPodPickler(BasePickler):
+    BUNDLE_TYPES = (float, int, complex, bool)
+
     def __init__(
         self,
         root_obj: Object,
@@ -124,9 +126,14 @@ class IndividualPodPickler(BasePickler):
         if isinstance(self.root_obj, FunctionType):
             # Don't decompose function object into many pods, due to dill's assumption in save_function.
             return None
+        if isinstance(obj, IndividualPodPickler.BUNDLE_TYPES):
+            # TODO: Check shared reference.
+            return None
+
         oid = object_id(obj)
         pid = make_pod_id(self.root_pid.tid, oid)
         if pid == self.root_pid:
+            # Always save root object, otherwise infinite recursion.
             return None
         if oid not in self.ctx.seen_oid:
             self.ctx.seen_oid.add(oid)
