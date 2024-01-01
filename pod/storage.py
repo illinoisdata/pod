@@ -5,7 +5,6 @@ Key-value storages with correlated/poset reads
 from __future__ import annotations
 
 import io
-import json
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
@@ -502,20 +501,20 @@ class PostgreSQLPodStorage(PodStorage):
 """ Redis storage """
 
 
-def serialize_pod_id(pod_id: PodId) -> str:
-    return json.dumps({"tid": pod_id.tid, "oid": pod_id.oid})
+def serialize_pod_id(pod_id: PodId) -> bytes:
+    return pickle.dumps(pod_id)
 
 
-def deserialize_pod_id(pod_id_str: str) -> PodId:
-    data = json.loads(pod_id_str)
-    return PodId(tid=data["tid"], oid=data["oid"])
+def deserialize_pod_id(serialized_pod_id: bytes) -> PodId:
+    pid = pickle.loads(serialized_pod_id)
+    return pid
 
 
 class RedisPodStorageWriter(PodWriter):
     def __init__(self, storage: RedisPodStorage) -> None:
         self.storage = storage
-        self.pod_data: Dict[str, bytes] = {}
-        self.dependency_map: Dict[str, Set[str]] = {}
+        self.pod_data: Dict[bytes, bytes] = {}
+        self.dependency_map: Dict[bytes, Set[bytes]] = {}
 
     def __enter__(self):
         return self
@@ -550,7 +549,7 @@ class RedisPodStorageReader(PodReader):
 
     def read(self, pod_id: PodId) -> io.IOBase:
         serialized_pod_id = serialize_pod_id(pod_id)
-        pod_bytes = self.storage.redis_client.get(f"pod_bytes:{serialized_pod_id}")
+        pod_bytes = self.storage.redis_client.get(f"pod_bytes:{serialized_pod_id!r}")
         pod_bytes = cast(bytes, pod_bytes)
         if pod_bytes is None:
             raise KeyError(f"Data not found for Pod ID: {pod_id}")
