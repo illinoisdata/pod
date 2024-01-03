@@ -287,7 +287,7 @@ class SUT:
         elif args.sut == "redis":
             return IndividualPodPickling(RedisPodStorage("localhost", 6379))
         elif args.sut == "neo4j":
-            return IndividualPodPickling(Neo4jPodStorage("localhost", 6379))
+            return IndividualPodPickling(Neo4jPodStorage("neo4j://localhost", 7687))
         raise ValueError(f'Invalid SUT name "{args.sut}"')
 
 

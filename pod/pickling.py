@@ -245,7 +245,7 @@ if __name__ == "__main__":
     elif storage_mode == "redis":
         pod_storage = RedisPodStorage("localhost", 6379)
     elif storage_mode == "neo4j":
-        pod_storage = Neo4jPodStorage("localhost", 6379)
+        pod_storage = Neo4jPodStorage("neo4j://localhost", 7687)
     else:
         raise ValueError(f"Invalid storage_mode= {storage_mode}")
 

@@ -4,6 +4,7 @@ Key-value storages with correlated/poset reads
 
 from __future__ import annotations
 
+import glob
 import io
 import os
 import pickle
@@ -623,8 +624,8 @@ class Neo4jPodStorageReader(PodReader):
 
 
 class Neo4jPodStorage(PodStorage):
-    def __init__(self, host: str, port: int) -> None:
-        self.driver = GraphDatabase.driver("neo4j://localhost:7687", auth=("neo4j", "pod_neo4j"))
+    def __init__(self, uri: str, port: int) -> None:
+        self.driver = GraphDatabase.driver(f"{uri}:{port}", auth=("neo4j", "pod_neo4j"))
         with self.driver.session() as session:
             session.run("CREATE INDEX pod_id_index IF NOT EXISTS FOR (p:Pod) ON (p.pod_id);")
         self.cache: Dict[bytes, io.BytesIO] = {}
@@ -654,13 +655,22 @@ class Neo4jPodStorage(PodStorage):
 
     def estimate_size(self) -> int:
         """Gets size of all files in used neo4j database"""
+        home_directory = os.path.expanduser("~")
+        search_pattern = os.path.join(home_directory, "neo4j-*/data/databases/neo4j")
+        matching_directories = glob.glob(search_pattern)
+        if len(matching_directories) > 1:
+            raise RuntimeError("Multiple Neo4j installations found. Please make sure only one exists in your user directory")
+        elif len(matching_directories) == 0:
+            raise RuntimeError("No Neo4j installation found. Please make sure you have it installed in your user directory")
+        else:
+            neo4j_dir = matching_directories[0]
+        neo4j_path = os.path.join(home_directory, neo4j_dir)
         total_size = 0
-        for dirpath, dirnames, filenames in os.walk("/Users/sumaythakurdesai/neo4j-community-5.15.0/data/databases/neo4j"):
+        for dirpath, dirnames, filenames in os.walk(neo4j_path):
             for f in filenames:
                 fp = os.path.join(dirpath, f)
                 if not os.path.islink(fp):
                     total_size += os.path.getsize(fp)
-
         return total_size
 
     def __del__(self):
