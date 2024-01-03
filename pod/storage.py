@@ -4,7 +4,9 @@ Key-value storages with correlated/poset reads
 
 from __future__ import annotations
 
+import glob
 import io
+import os
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,8 +15,18 @@ from typing import Any, Dict, List, Set, Tuple, cast
 import psycopg2
 import redis
 from dataclasses_json import dataclass_json
+from neo4j import GraphDatabase
 
 from pod.common import PodId
+
+
+def serialize_pod_id(pod_id: PodId) -> bytes:
+    return pickle.dumps(pod_id)
+
+
+def deserialize_pod_id(serialized_pod_id: bytes) -> PodId:
+    pid = pickle.loads(serialized_pod_id)
+    return pid
 
 
 class PodWriter:
@@ -338,7 +350,7 @@ class PostgreSQLPodStorageWriter(PodWriter):
     def __init__(self, storage: PostgreSQLPodStorage) -> None:
         self.storage = storage
         self.storage_buffer: List[Tuple] = []
-        self.dependency_map: Dict[Tuple, Set[Tuple]] = {}
+        self.dependency_buffer: List[Tuple] = []
 
     def __enter__(self):
         return self
@@ -364,22 +376,8 @@ class PostgreSQLPodStorageWriter(PodWriter):
 
     def flush_dependencies(self):
         with self.storage.db_conn.cursor() as cursor:
-            # Aggregating all new dependencies
-            all_new_deps = set()
-            for pid, deps in self.dependency_map.items():
-                all_new_deps.update(((pid[0], pid[1], d[0], d[1]) for d in deps))
-
-            # Format the all_new_deps for delete query
-            delete_values = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x).decode() for x in all_new_deps)
-            if delete_values:
-                delete_query = f"""
-                    DELETE FROM pod_dependencies
-                    WHERE (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid) NOT IN (VALUES {delete_values})
-                """
-                cursor.execute(delete_query)
-
             # Constructing insert query
-            insert_values = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x).decode() for x in all_new_deps)
+            insert_values = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x).decode() for x in self.dependency_buffer)
             if insert_values:
                 insert_query = f"""
                     INSERT INTO pod_dependencies (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid)
@@ -387,7 +385,7 @@ class PostgreSQLPodStorageWriter(PodWriter):
                     ON CONFLICT DO NOTHING
                 """
                 cursor.execute(insert_query)
-        self.dependency_map = {}
+        self.dependency_buffer = []
 
     def write_pod(
         self,
@@ -401,9 +399,7 @@ class PostgreSQLPodStorageWriter(PodWriter):
         pod_id: PodId,
         dep_pids: Set[PodId],  # List of pids this pod depends on.
     ) -> None:
-        if (pod_id.tid, pod_id.oid) not in self.dependency_map:
-            self.dependency_map[(pod_id.tid, pod_id.oid)] = set()
-        self.dependency_map[(pod_id.tid, pod_id.oid)].update((p.tid, p.oid) for p in dep_pids)
+        self.dependency_buffer += [(pod_id.tid, pod_id.oid, p.tid, p.oid) for p in dep_pids]
 
 
 class PostgreSQLPodStorageReader(PodReader):
@@ -501,15 +497,6 @@ class PostgreSQLPodStorage(PodStorage):
 """ Redis storage """
 
 
-def serialize_pod_id(pod_id: PodId) -> bytes:
-    return pickle.dumps(pod_id)
-
-
-def deserialize_pod_id(serialized_pod_id: bytes) -> PodId:
-    pid = pickle.loads(serialized_pod_id)
-    return pid
-
-
 class RedisPodStorageWriter(PodWriter):
     def __init__(self, storage: RedisPodStorage) -> None:
         self.storage = storage
@@ -572,3 +559,119 @@ class RedisPodStorage(PodStorage):
             raise RuntimeError("Error estimating size")
         memory_data = cast(Dict[str, Any], memory_data)
         return memory_data["used_memory"]
+
+
+"""Neo4j pod storage"""
+
+
+class Neo4jPodStorageWriter(PodWriter):
+    def __init__(self, storage: Neo4jPodStorage) -> None:
+        self.storage = storage
+        self.pod_data: List[Tuple[bytes, bytes]] = []
+        self.dependencies: List[Tuple[bytes, bytes]] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.flush_data()
+
+    def flush_data(self):
+        with self.storage.driver.session() as session:
+            with session.begin_transaction() as tx:
+                # Write the pod
+                tx.run(
+                    "UNWIND $pods_list AS pod " "CREATE (p:Pod {pod_id: pod[0], pod_bytes: pod[1]}) ", pods_list=self.pod_data
+                )
+
+                # Write all dependencies at once
+                tx.run(
+                    "UNWIND $deps_list AS dep "
+                    "MATCH (p:Pod {pod_id: dep[0]}) "
+                    "MATCH (depPod:Pod {pod_id: dep[1]}) "
+                    "CREATE (p)-[:DEPENDS_ON]->(depPod)",
+                    deps_list=self.dependencies,
+                )
+                tx.commit()
+
+    def write_pod(self, pod_id: PodId, pod_bytes: bytes) -> None:
+        serialized_pod_id = serialize_pod_id(pod_id)
+        self.pod_data.append((serialized_pod_id, pod_bytes))
+
+    def write_dep(self, pod_id: PodId, dep_pids: Set[PodId]) -> None:
+        serialized_pod_id = serialize_pod_id(pod_id)
+        new_deps = [(serialized_pod_id, serialize_pod_id(dep)) for dep in dep_pids]
+        self.dependencies += new_deps
+
+
+class Neo4jPodStorageReader(PodReader):
+    def __init__(self, storage: Neo4jPodStorage) -> None:
+        self.storage = storage
+
+    def read(self, pod_id: PodId) -> io.IOBase:
+        serialized_pod_id = serialize_pod_id(pod_id)
+        if serialized_pod_id in self.storage.cache:
+            return self.storage.cache[serialized_pod_id]
+        with self.storage.driver.session() as session:
+            result = session.run("MATCH (p:Pod {pod_id: $pod_id}) RETURN p.pod_bytes", pod_id=serialized_pod_id)
+            record = result.single()
+        if record is None:
+            raise KeyError(f"Data not found for Pod ID: {pod_id}")
+
+        pod_bytes = record["p.pod_bytes"]
+        pod_bytes = cast(bytes, pod_bytes)
+        return io.BytesIO(pod_bytes)
+
+
+class Neo4jPodStorage(PodStorage):
+    def __init__(self, uri: str, port: int) -> None:
+        self.driver = GraphDatabase.driver(f"{uri}:{port}", auth=("neo4j", "pod_neo4j"))
+        with self.driver.session() as session:
+            session.run("CREATE INDEX pod_id_index IF NOT EXISTS FOR (p:Pod) ON (p.pod_id);")
+        self.cache: Dict[bytes, io.BytesIO] = {}
+
+    def writer(self) -> PodWriter:
+        return Neo4jPodStorageWriter(self)
+
+    def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
+        serialized_pod_ids = [serialize_pod_id(pid) for pid in hint_pod_ids]
+        with self.driver.session() as session:
+            query = """
+            UNWIND $pod_ids AS pod_id
+            MATCH (p:Pod {pod_id: pod_id})
+            OPTIONAL MATCH (p)-[:DEPENDS_ON*]->(depPod:Pod)
+            WITH p, COLLECT(DISTINCT depPod) AS depPods
+            UNWIND [p] + depPods AS allPods
+            RETURN DISTINCT allPods.pod_id AS pod_id, allPods.pod_bytes AS pod_bytes
+            """
+            result = session.run(query, pod_ids=serialized_pod_ids)
+            for record in result:
+                pid = record["pod_id"]
+                pod_bytes = record["pod_bytes"]
+                if pod_bytes:
+                    self.cache[pid] = io.BytesIO(pod_bytes)
+
+        return Neo4jPodStorageReader(self)
+
+    def estimate_size(self) -> int:
+        """Gets size of all files in used neo4j database"""
+        home_directory = os.path.expanduser("~")
+        search_pattern = os.path.join(home_directory, "neo4j-*/data/databases/neo4j")
+        matching_directories = glob.glob(search_pattern)
+        if len(matching_directories) > 1:
+            raise RuntimeError("Multiple Neo4j installations found. Please make sure only one exists in your user directory")
+        elif len(matching_directories) == 0:
+            raise RuntimeError("No Neo4j installation found. Please make sure you have it installed in your user directory")
+        else:
+            neo4j_dir = matching_directories[0]
+        neo4j_path = os.path.join(home_directory, neo4j_dir)
+        total_size = 0
+        for dirpath, dirnames, filenames in os.walk(neo4j_path):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                if not os.path.islink(fp):
+                    total_size += os.path.getsize(fp)
+        return total_size
+
+    def __del__(self):
+        self.driver.close()
