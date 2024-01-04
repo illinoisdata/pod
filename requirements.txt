@@ -202,7 +202,6 @@ tensorboard-data-server==0.7.2
 tensorflow==2.15.0
 tensorflow-estimator==2.15.0
 tensorflow-io-gcs-filesystem==0.34.0
-tensorflow-macos==2.15.0
 termcolor==2.4.0
 terminado==0.18.0
 thinc==8.2.2
