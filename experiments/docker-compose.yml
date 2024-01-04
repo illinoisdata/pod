@@ -1,0 +1,20 @@
+version: "3"
+services:
+  pod:
+    image: pod
+    hostname: pod
+    tty: true
+    stdin_open: true
+    volumes:
+      - ${PWD}:/ws
+    working_dir: /ws
+    command: ["/bin/bash"]
+  podpsql:
+    image: podpsql
+    hostname: podpsql
+    tty: true
+    stdin_open: true
+    volumes:
+      - ${PWD}:/ws
+    working_dir: /ws
+    command: ["postgres", "-p", "5433"]
