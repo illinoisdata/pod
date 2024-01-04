@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 import sys
 import time
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Generator, List, Optional, Tuple
@@ -263,7 +264,7 @@ class NotebookExecutor:
             try:
                 exec(cell, self.the_globals, self.the_locals)
             except Exception as e:
-                logger.error("Exception while executing...\n" f"{cell}\n" f"...with exception {type(e).__name__}: {e}")
+                logger.error("Exception while executing...\n" f"{cell}\n" f"...with {traceback.format_exc()}")
                 sys.exit(2)
             yield cell, self.the_globals, self.the_locals
 
