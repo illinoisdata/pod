@@ -76,7 +76,7 @@ function prepare_sut() {
         rm -r ${POD_DIR}
     elif [[ $_SUT == "imm" ]]
     then
-        noop
+        :
     elif [[ $_SUT == "pfl" ]]
     then
         rm -r ${POD_DIR}
