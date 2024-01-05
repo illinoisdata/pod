@@ -70,7 +70,6 @@ function get_sut_args() {
 
 function prepare_sut() {
     local _SUT=$1
-    local retVal=$2
     if [[ $_SUT == "snp" ]]
     then
         rm -r ${POD_DIR}
@@ -84,6 +83,5 @@ function prepare_sut() {
         echo "ERROR: Invalid SUT $_SUT"
         exit 1
     fi
-    eval $retVal="'${sut_args}'"
     return 0
 }

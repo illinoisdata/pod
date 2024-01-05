@@ -263,7 +263,7 @@ class NotebookExecutor:
         for cell in self.cells.iter():
             try:
                 exec(cell, self.the_globals, self.the_locals)
-            except Exception as e:
+            except Exception:
                 logger.error("Exception while executing...\n" f"{cell}\n" f"...with {traceback.format_exc()}")
                 sys.exit(2)
             yield cell, self.the_globals, self.the_locals
