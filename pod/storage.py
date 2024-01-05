@@ -10,6 +10,7 @@ import os
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
+from queue import Queue
 from typing import Any, Dict, List, Set, Tuple, cast
 
 import psycopg2
@@ -137,8 +138,9 @@ class FilePodStorageStats:
 FilePodStorageIndex = Dict[PodId, int]
 FilePodStoragePodIdSynonym = Dict[PodId, PodId]
 FilePodStoragePodIdByBytes = Dict[bytes, PodId]
+FilePodStoragePodIdDep = Dict[PodId, Set[PodId]]
 FilePodStoragePodPage = Dict[PodId, bytes]
-FilePodStorageDepPage = Dict[PodId, Set[PodId]]
+FilePodStorageDepPage = FilePodStoragePodIdDep
 
 
 class FilePodStorageWriter(PodWriter):
@@ -178,7 +180,7 @@ class FilePodStorageWriter(PodWriter):
         self.dep_page_buffer[pod_id] = dep_pids
 
     def flush_pod(self) -> None:
-        # WRite buffer.
+        # Write buffer.
         page_idx = self.storage.next_pod_page_idx()
         with open(self.storage.pod_page_path(page_idx), "wb") as f:
             pickle.dump(self.pod_page_buffer, f)
@@ -191,10 +193,13 @@ class FilePodStorageWriter(PodWriter):
         self.pod_page_buffer_size = 0
 
     def flush_dep(self) -> None:
-        # WRite buffer.
+        # Write buffer.
         page_idx = self.storage.next_dep_page_idx()
         with open(self.storage.dep_page_path(page_idx), "wb") as f:
             pickle.dump(self.dep_page_buffer, f)
+
+        # Save to in-memory storage.
+        self.storage.pid_deps.update(self.dep_page_buffer)
 
         # Reset buffer state.
         self.dep_page_buffer = {}
@@ -209,9 +214,12 @@ class FilePodStorageWriter(PodWriter):
 
 
 class FilePodStorageReader(PodReader):
-    def __init__(self, storage: FilePodStorage) -> None:
+    def __init__(self, storage: FilePodStorage, page_idxs: Set[int]) -> None:
         self.storage = storage
         self.page_cache: Dict[int, FilePodStoragePodPage] = {}
+        for page_idx in page_idxs:
+            with open(self.storage.pod_page_path(page_idx), "rb") as f:
+                self.page_cache[page_idx] = pickle.load(f)
 
     def read(self, pod_id: PodId) -> io.IOBase:
         resolved_pid = self.storage.resolve_pid_synonym(pod_id)
@@ -239,24 +247,33 @@ class FilePodStorage(PodStorage):
         self.pid_index: FilePodStorageIndex = {}
         self.pid_synonym: FilePodStoragePodIdSynonym = {}
         self.pid_by_bytes: FilePodStoragePodIdByBytes = {}  # TODO: Move out of memor.
+        self.pid_deps: FilePodStoragePodIdDep = {}
         if self.is_init():
             self.stats = self.reload_stats()
             self.pid_index = self.reload_index()
             self.pid_synonym = self.reload_pid_synonym()
             self.pid_by_bytes = self.reload_pid_by_bytes()  # TODO: Reload as needed.
+            self.pid_deps = self.reload_pid_deps()
 
     def writer(self) -> PodWriter:
         return FilePodStorageWriter(self)
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
-        # TODO: Leverage dep to prefetch relevant pods.
-        return FilePodStorageReader(self)
+        pid_queue: Queue[PodId] = Queue()
+        for pid in hint_pod_ids:
+            pid_queue.put(pid)
+        page_idxs: Set[int] = set()
+        while not pid_queue.empty():
+            pid = pid_queue.get()
+            resolved_pid = self.resolve_pid_synonym(pid)
+            page_idx = self.search_index(resolved_pid)
+            page_idxs.add(page_idx)
+            for dep_pid in self.pid_deps[pid]:
+                pid_queue.put(dep_pid)
+        return FilePodStorageReader(self, page_idxs)
 
     def estimate_size(self) -> int:
         return sum(f.stat().st_size for f in self.root_dir.glob("**/*") if f.is_file())
-
-    def dep_path(self, pid: PodId) -> Path:
-        return self.root_dir / f"{pid.tid}_{pid.oid}_dep.pkl"
 
     def next_pod_page_idx(self) -> int:
         page_idx = self.stats.pod_page_count
@@ -338,6 +355,15 @@ class FilePodStorage(PodStorage):
             for pod_id, pod_bytes in page.items():
                 pid_by_bytes[pod_bytes] = pod_id
         return pid_by_bytes
+
+    def reload_pid_deps(self) -> FilePodStoragePodIdDep:
+        pid_deps: FilePodStoragePodIdDep = {}
+        for page_path in self.root_dir.glob("dep_*.pkl"):
+            with open(page_path, "rb") as f:
+                page = pickle.load(f)
+            for pod_id, deps in page.items():
+                pid_deps[pod_id] = deps
+        return pid_deps
 
     def is_init(self) -> bool:
         return self.stats_path().exists() and self.index_path().exists()

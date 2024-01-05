@@ -231,7 +231,10 @@ if __name__ == "__main__":
 
     # Initialize storage
     # storage_mode = "dict"
-    storage_mode = "neo4j"
+    storage_mode = "file"
+    # storage_mode = "postgres"
+    # storage_mode = "redis"
+    # storage_mode = "neo4j"
     pod_storage: Optional[PodStorage] = None
     if storage_mode == "dict":
         pod_storage = DictPodStorage()
