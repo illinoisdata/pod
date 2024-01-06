@@ -227,14 +227,22 @@ if __name__ == "__main__":
     from pathlib import Path
 
     from pod.common import plot_deps
-    from pod.storage import DictPodStorage, FilePodStorage, Neo4jPodStorage, PostgreSQLPodStorage, RedisPodStorage
+    from pod.storage import (
+        DictPodStorage,
+        FilePodStorage,
+        MongoPodStorage,
+        Neo4jPodStorage,
+        PostgreSQLPodStorage,
+        RedisPodStorage,
+    )
 
     # Initialize storage
     # storage_mode = "dict"
-    storage_mode = "file"
+    # storage_mode = "file"
     # storage_mode = "postgres"
     # storage_mode = "redis"
     # storage_mode = "neo4j"
+    storage_mode = "mongo"
     pod_storage: Optional[PodStorage] = None
     if storage_mode == "dict":
         pod_storage = DictPodStorage()
@@ -249,6 +257,8 @@ if __name__ == "__main__":
         pod_storage = RedisPodStorage("localhost", 6379)
     elif storage_mode == "neo4j":
         pod_storage = Neo4jPodStorage("neo4j://localhost", 7687)
+    elif storage_mode == "mongo":
+        pod_storage = MongoPodStorage("localhost", 27017)
     else:
         raise ValueError(f"Invalid storage_mode= {storage_mode}")
 

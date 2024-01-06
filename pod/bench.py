@@ -16,7 +16,7 @@ from loguru import logger
 
 from pod.common import PodId
 from pod.pickling import IndividualPodPickling, PodPickling, SnapshotPodPickling
-from pod.storage import DictPodStorage, FilePodStorage, Neo4jPodStorage, PostgreSQLPodStorage, RedisPodStorage
+from pod.storage import DictPodStorage, FilePodStorage, MongoPodStorage, Neo4jPodStorage, PostgreSQLPodStorage, RedisPodStorage
 
 """ Parameters """
 
@@ -289,6 +289,8 @@ class SUT:
             return IndividualPodPickling(RedisPodStorage("localhost", 6379))
         elif args.sut == "neo4j":
             return IndividualPodPickling(Neo4jPodStorage("neo4j://localhost", 7687))
+        elif args.sut == "mongo":
+            return IndividualPodPickling(MongoPodStorage("localhost", 27017))
         raise ValueError(f'Invalid SUT name "{args.sut}"')
 
 
