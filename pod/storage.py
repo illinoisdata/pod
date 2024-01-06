@@ -14,6 +14,7 @@ from queue import Queue
 from typing import Any, Dict, List, Set, Tuple, cast
 
 import psycopg2
+import pymongo
 import redis
 from dataclasses_json import dataclass_json
 from neo4j import GraphDatabase
@@ -701,3 +702,100 @@ class Neo4jPodStorage(PodStorage):
 
     def __del__(self):
         self.driver.close()
+
+
+"""MongoDB Pod Storage"""
+
+
+class MongoPodStorageWriter(PodWriter):
+    def __init__(self, storage: MongoPodStorage) -> None:
+        self.storage = storage
+        self.pods: List[Tuple[PodId, bytes]] = []
+        self.dependency_map: Dict[PodId, Set[PodId]] = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.flush_data()
+
+    def flush_data(self):
+        docs = []
+        for pod_id, pod_bytes in self.pods:
+            doc = self.construct_document(pod_id, pod_bytes)
+            docs.append(doc)
+        self.storage.collection.insert_many(docs)
+        self.pods = []
+        self.dependency_map = {}
+
+    def construct_document(self, pod_id: PodId, pod_bytes: bytes):
+        deps_list = []
+        if pod_id in self.dependency_map:
+            deps_list = [serialize_pod_id(dep_pid) for dep_pid in self.dependency_map[pod_id] if self.dependency_map[pod_id]]
+        doc = {"_id": serialize_pod_id(pod_id), "pod_bytes": pod_bytes, "dependencies": deps_list}
+        return doc
+
+    def write_pod(
+        self,
+        pod_id: PodId,
+        pod_bytes: bytes,
+    ) -> None:
+        self.pods.append((pod_id, pod_bytes))
+
+    def write_dep(
+        self,
+        pod_id: PodId,
+        dep_pids: Set[PodId],  # List of pids this pod depends on.
+    ) -> None:
+        self.dependency_map[pod_id] = dep_pids
+
+
+class MongoPodStorageReader(PodReader):
+    def __init__(self, storage: MongoPodStorage) -> None:
+        self.storage = storage
+
+    def read(self, pod_id: PodId) -> io.IOBase:
+        serialized_pod_id = serialize_pod_id(pod_id)
+        if serialized_pod_id in self.storage.cache:
+            return self.storage.cache[serialized_pod_id]
+        result = self.storage.collection.find_one({"_id": serialized_pod_id})
+        if result is None or "pod_bytes" not in result:
+            raise KeyError(f"Data not found for Pod ID: {pod_id}")
+        return io.BytesIO(result["pod_bytes"])
+
+
+class MongoPodStorage(PodStorage):
+    def __init__(self, host: str, port: int) -> None:
+        self.mongo_client: pymongo.MongoClient = pymongo.MongoClient(host=host, port=port)
+        self.db = self.mongo_client.pod
+        self.collection = self.db.pod
+        self.cache: Dict[bytes, io.BytesIO] = {}
+
+    def writer(self) -> PodWriter:
+        return MongoPodStorageWriter(self)
+
+    def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
+        serialized_hint_pod_ids = [serialize_pod_id(pid) for pid in hint_pod_ids]
+        pipeline: List[Dict[str, Any]] = [
+            {"$match": {"_id": {"$in": serialized_hint_pod_ids}}},
+            {
+                "$graphLookup": {
+                    "from": "pod",  # replace with your collection name
+                    "startWith": "$_id",
+                    "connectFromField": "dependencies",
+                    "connectToField": "_id",
+                    "as": "all_dependencies",
+                }
+            },
+            {"$project": {"_id": 1, "pod_bytes": 1, "all_dependencies._id": 1, "all_dependencies.pod_bytes": 1}},
+        ]
+        result = self.collection.aggregate(pipeline)
+        for doc in result:
+            self.cache[doc["_id"]] = io.BytesIO(doc["pod_bytes"])
+            for dep in doc.get("all_dependencies", []):
+                self.cache[dep["_id"]] = io.BytesIO(dep["pod_bytes"])
+        return MongoPodStorageReader(self)
+
+    def estimate_size(self) -> int:
+        stats = self.db.command("collstats", self.collection.name)
+        return stats["size"]  # Size in bytes
