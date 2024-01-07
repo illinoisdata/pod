@@ -7,12 +7,12 @@
 NB_MAP=(
     "rmlist rmlist"
 
-    # "storesfg notebooks/store-sales-ts-forecasting-a-comprehensive-guide.ipynb"
-    # "itsttime notebooks/it-s-that-time-of-the-year-again.ipynb"
-    # "buildats notebooks/building-an-asset-trading-strategy.ipynb"
-    # "spacestt notebooks/spaceship-titanic-a-complete-guide.ipynb"
-    # "betterxb notebooks/better-xgb-baseline.ipynb"
-    # "tpsmay22 notebooks/tpsmay22-insightful-eda-fe-baseline.ipynb"
+    "storesfg notebooks/store-sales-ts-forecasting-a-comprehensive-guide.ipynb"
+    "itsttime notebooks/it-s-that-time-of-the-year-again.ipynb"
+    "buildats notebooks/building-an-asset-trading-strategy.ipynb"
+    "spacestt notebooks/spaceship-titanic-a-complete-guide.ipynb"
+    "betterxb notebooks/better-xgb-baseline.ipynb"
+    "tpsmay22 notebooks/tpsmay22-insightful-eda-fe-baseline.ipynb"
 )
 
 # Parse into two arrays.

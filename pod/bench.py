@@ -11,11 +11,11 @@ from typing import Generator, List, Optional, Tuple
 import nbformat
 import numpy as np
 import simple_parsing
-from dataclasses_json import dataclass_json
 from loguru import logger
 
 from pod.common import PodId
-from pod.pickling import IndividualPodPickling, PodPickling, SnapshotPodPickling
+from pod.pickling import PodPickling, SnapshotPodPickling, StaticPodPickling
+from pod.stats import ExpStat
 from pod.storage import DictPodStorage, FilePodStorage, MongoPodStorage, Neo4jPodStorage, PostgreSQLPodStorage, RedisPodStorage
 
 """ Parameters """
@@ -47,120 +47,6 @@ class BenchArgs:
 
     """ Pod storage """
     pod_dir: Optional[Path] = None  # Path to pod storage root directory.
-
-
-""" Measurement, logging, and output """
-
-
-def strf_deltatime(time_s: float) -> str:
-    if time_s >= 3600.0:
-        return f"{time_s // 3600:.0f}:{(time_s % 3600) // 60:.0f}:{time_s % 60:.0f}"
-    if time_s >= 60.0:
-        return f"{time_s // 60:.0f}:{time_s % 60:.0f}"
-    if time_s >= 1.0:
-        return f"{time_s:.1f} sec"
-    if time_s >= 1e-3:
-        return f"{time_s*1e3:.1f} msec"
-    return f"{time_s*1e6:.1f} usec"
-
-
-def strf_storage(storage_b: int) -> str:
-    if storage_b >= 1e9:
-        return f"{storage_b / 1e9:.1f} GB"
-    if storage_b >= 1e6:
-        return f"{storage_b / 1e6:.1f} MB"
-    if storage_b >= 1e3:
-        return f"{storage_b / 1e3:.1f} KB"
-    return f"{storage_b} B"
-
-
-def strf_throughput(tput: float) -> str:
-    if tput >= 1e9:
-        return f"{tput / 1e9:.1f} Gop/s"
-    if tput >= 1e6:
-        return f"{tput / 1e6:.1f} Mop/s"
-    if tput >= 1e3:
-        return f"{tput / 1e3:.1f} Kop/s"
-    return f"{tput:.1f} op/s"
-
-
-@dataclass_json
-@dataclass
-class DumpStat:
-    nth: int
-    time_s: float
-    storage_b: int
-
-
-@dataclass_json
-@dataclass
-class LoadStat:
-    nth: int
-    time_s: float
-
-
-@dataclass_json
-@dataclass
-class ExpStat:
-    dumps: List[DumpStat] = field(default_factory=lambda: [])
-    loads: List[LoadStat] = field(default_factory=lambda: [])
-
-    dump_sum_t_s: float = 0.0
-    load_sum_t_s: float = 0.0
-
-    def add_dump(self, nth: int, time_s: float, storage_b: int) -> None:
-        self.dumps.append(
-            DumpStat(
-                nth=nth,
-                time_s=time_s,
-                storage_b=storage_b,
-            )
-        )
-
-        self.dump_sum_t_s += time_s
-        dump_avg_t_s = self.dump_sum_t_s / len(self.dumps)
-        logger.info(
-            f"nth= {nth}, t= {strf_deltatime(time_s)}, s= {strf_storage(storage_b)}"
-            f", avgt= {strf_deltatime(dump_avg_t_s)} ({strf_throughput(1.0/dump_avg_t_s)})"
-        )
-
-    def add_load(self, nth: int, time_s: float) -> None:
-        self.loads.append(
-            LoadStat(
-                nth=nth,
-                time_s=time_s,
-            )
-        )
-
-        self.load_sum_t_s += time_s
-        load_avg_t_s = self.load_sum_t_s / len(self.loads)
-        logger.info(
-            f"nth= {nth}, t= {strf_deltatime(time_s)}"
-            f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})"
-        )
-
-    def summary(self) -> None:
-        dump_avg_t_s = self.dump_sum_t_s / len(self.dumps)
-        load_avg_t_s = self.load_sum_t_s / len(self.loads)
-        logger.info(
-            f"{len(self.dumps)} dumps"
-            f", avgt= {strf_deltatime(dump_avg_t_s)} ({strf_throughput(1.0/dump_avg_t_s)}), "
-            f"s= {strf_storage(self.dumps[-1].storage_b)}"
-        )
-        logger.info(f"{len(self.loads)} loads" f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})")
-
-    def save(self, save_dir: Path) -> Path:
-        save_dir.mkdir(parents=True, exist_ok=True)
-        result_path = save_dir / "expstat.json"
-        with open(result_path, "w") as f:
-            f.write(self.to_json())  # type: ignore
-        return result_path
-
-    @staticmethod
-    def load(save_dir: Path) -> ExpStat:
-        result_path = save_dir / "expstat.json"
-        with open(result_path, "r") as f:
-            return ExpStat.from_json(f.read())  # type: ignore
 
 
 """ Notebook handler/executor """
@@ -220,6 +106,10 @@ class RandomMutatingListCells(NotebookCells):
             return (
                 "import secrets\n"
                 "import random\n"
+                "def f():\n"
+                "  def g():\n"
+                "    return 0\n"
+                "  return 0\n"
                 "l = [\n"
                 f"  secrets.token_bytes({self.elem_size})\n"
                 f"  for idx in range({self.list_size})\n"
@@ -276,21 +166,21 @@ class SUT:
     @staticmethod
     def sut(args: BenchArgs) -> PodPickling:
         if args.sut == "inmem_dict":
-            return IndividualPodPickling(DictPodStorage())
+            return StaticPodPickling(DictPodStorage())
         elif args.sut == "snapshot":
             assert args.pod_dir is not None, "snapshot requires --pod_dir"
             return SnapshotPodPickling(args.pod_dir)
         elif args.sut == "pod_file":
             assert args.pod_dir is not None, "pod_file requires --pod_dir"
-            return IndividualPodPickling(FilePodStorage(args.pod_dir))
+            return StaticPodPickling(FilePodStorage(args.pod_dir))
         elif args.sut == "postgres":
-            return IndividualPodPickling(PostgreSQLPodStorage("localhost", 5432))
+            return StaticPodPickling(PostgreSQLPodStorage("localhost", 5432))
         elif args.sut == "redis":
-            return IndividualPodPickling(RedisPodStorage("localhost", 6379))
+            return StaticPodPickling(RedisPodStorage("localhost", 6379))
         elif args.sut == "neo4j":
-            return IndividualPodPickling(Neo4jPodStorage("neo4j://localhost", 7687))
+            return StaticPodPickling(Neo4jPodStorage("neo4j://localhost", 7687))
         elif args.sut == "mongo":
-            return IndividualPodPickling(MongoPodStorage("localhost", 27017))
+            return StaticPodPickling(MongoPodStorage("localhost", 27017))
         raise ValueError(f'Invalid SUT name "{args.sut}"')
 
 

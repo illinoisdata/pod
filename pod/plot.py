@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import simple_parsing
 from loguru import logger
 
-from pod.bench import ExpStat
+from pod.stats import ExpStat
 
 """
 Example:
