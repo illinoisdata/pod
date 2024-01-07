@@ -15,7 +15,7 @@ RUN python -m pip install -r /pod/requirements.txt
 COPY ./pod /pod/pod
 COPY ./setup.py /pod/setup.py
 COPY ./README.md /pod/README.md
-RUN python -m pip install /pod/
+RUN python -m pip install -e /pod/
 
 WORKDIR /
 ENTRYPOINT /bin/bash

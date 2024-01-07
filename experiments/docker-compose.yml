@@ -6,8 +6,8 @@ services:
     tty: true
     stdin_open: true
     volumes:
-      - ${PWD}:/ws
-    working_dir: /ws
+      - ${PWD}:/pod
+    working_dir: /pod
     command: ["/bin/bash"]
   podpsql:
     image: podpsql
@@ -15,6 +15,6 @@ services:
     tty: true
     stdin_open: true
     volumes:
-      - ${PWD}:/ws
-    working_dir: /ws
+      - ${PWD}:/pod
+    working_dir: /pod
     command: ["postgres", "-p", "5433"]

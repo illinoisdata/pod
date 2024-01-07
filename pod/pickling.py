@@ -7,10 +7,13 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 from queue import Queue
-from types import FunctionType
+from types import CodeType, FunctionType, ModuleType, NoneType
 from typing import Any, Dict, Optional, Set
 
 import dill as pickle
+import matplotlib.figure
+import numpy as np
+import pandas as pd
 from dill import Pickler as BasePickler
 from dill import Unpickler as BaseUnpickler
 
@@ -89,29 +92,71 @@ class SnapshotPodPickling(PodPickling):
 
 
 @dataclass
-class IndividualPodPicklerContext:
+class StaticPodPicklerJob:
+    obj: Object
+    is_final: bool
+
+
+@dataclass
+class StaticPodPicklerContext:
     seen_oid: Set[ObjectId]
-    obj_queue: Queue[Object]
+    job_queue: Queue[StaticPodPicklerJob]
 
     @staticmethod
-    def new(obj: Object) -> IndividualPodPicklerContext:
-        obj_queue: Queue[Object] = Queue()
-        obj_queue.put(obj)
+    def new(obj: Object) -> StaticPodPicklerContext:
+        job_queue: Queue[StaticPodPicklerJob] = Queue()
+        job_queue.put(StaticPodPicklerJob(obj, is_final=False))
         seen_oid = {object_id(obj)}
-        return IndividualPodPicklerContext(
+        return StaticPodPicklerContext(
             seen_oid=seen_oid,
-            obj_queue=obj_queue,
+            job_queue=job_queue,
         )
 
 
-class IndividualPodPickler(BasePickler):
-    BUNDLE_TYPES = (float, int, complex, bool)
+class StaticPodPickler(BasePickler):
+    BUNDLE_TYPES = (
+        # Constant/small size.
+        float,
+        int,
+        complex,
+        bool,
+        # Forbidden due to dill's assumption in save_function.
+        tuple,
+        dict,
+        # Common ignores.
+        NoneType,
+        type,
+    )
+    SPLIT_TYPES = (
+        # Builtin types.
+        str,
+        bytes,
+        list,
+        # Numerical types.
+        np.ndarray,
+        pd.DataFrame,
+        matplotlib.figure.Figure,
+        # Nested types.
+        FunctionType,
+        ModuleType,
+        CodeType,
+    )
+    FINAL_TYPES = (
+        # Builtin types.
+        str,
+        bytes,
+        # list,
+        # Numerical types.
+        np.ndarray,
+        pd.DataFrame,
+        matplotlib.figure.Figure,
+    )
 
     def __init__(
         self,
         root_obj: Object,
         root_pid: PodId,
-        ctx: IndividualPodPicklerContext,
+        ctx: StaticPodPicklerContext,
         file: io.IOBase,
         *args,
         **kwargs,
@@ -123,11 +168,12 @@ class IndividualPodPickler(BasePickler):
         self.ctx = ctx
 
     def persistent_id(self, obj: Object) -> Optional[ObjectId]:
-        if isinstance(self.root_obj, FunctionType):
-            # Don't decompose function object into many pods, due to dill's assumption in save_function.
-            return None
-        if isinstance(obj, IndividualPodPickler.BUNDLE_TYPES):
+        if isinstance(obj, StaticPodPickler.BUNDLE_TYPES):
             # TODO: Check shared reference.
+            return None
+        if not isinstance(obj, StaticPodPickler.SPLIT_TYPES):
+            # Split only allowed types.
+            # print(type(obj))
             return None
 
         oid = object_id(obj)
@@ -137,7 +183,12 @@ class IndividualPodPickler(BasePickler):
             return None
         if oid not in self.ctx.seen_oid:
             self.ctx.seen_oid.add(oid)
-            self.ctx.obj_queue.put(obj)
+            self.ctx.job_queue.put(
+                StaticPodPicklerJob(
+                    obj=obj,
+                    is_final=isinstance(obj, StaticPodPickler.FINAL_TYPES),
+                )
+            )
         self.root_deps.add(pid)
         return oid
 
@@ -145,7 +196,7 @@ class IndividualPodPickler(BasePickler):
         return self.root_deps
 
 
-class IndividualPodUnpickler(PodUnpickler):
+class StaticPodUnpickler(PodUnpickler):
     def __init__(self, tid: TimeId, reader: PodReader, file: io.IOBase, *args, **kwargs) -> None:
         PodUnpickler.__init__(self, file, *args, **kwargs)
         self.tid = tid
@@ -153,8 +204,8 @@ class IndividualPodUnpickler(PodUnpickler):
         self.args = args
         self.kwargs = kwargs
 
-    def clone_new(self, file: io.IOBase) -> IndividualPodUnpickler:
-        return IndividualPodUnpickler(self.tid, self.reader, file, *self.args, **self.kwargs)
+    def clone_new(self, file: io.IOBase) -> StaticPodUnpickler:
+        return StaticPodUnpickler(self.tid, self.reader, file, *self.args, **self.kwargs)
 
     def copy_into(self, new_self: PodUnpickler):
         PodUnpickler.copy_into(self, new_self)
@@ -169,7 +220,7 @@ class IndividualPodUnpickler(PodUnpickler):
     @staticmethod
     def load_from_reader(tid: TimeId, reader: PodReader, pid: PodId, *args, **kwargs) -> Object:
         with reader.read(pid) as obj_io:
-            return IndividualPodUnpickler(
+            return StaticPodUnpickler(
                 tid,
                 reader,
                 obj_io,
@@ -178,7 +229,7 @@ class IndividualPodUnpickler(PodUnpickler):
             ).load()
 
 
-class IndividualPodPickling(PodPickling):
+class StaticPodPickling(PodPickling):
     def __init__(self, storage: PodStorage, pickle_kwargs: Dict[str, Any] = {}) -> None:
         self.storage = storage
         self.pickle_kwargs = pickle_kwargs
@@ -186,32 +237,42 @@ class IndividualPodPickling(PodPickling):
     def dump(self, obj: Object) -> PodId:
         tid = step_time_id()
         pid = make_pod_id(tid, object_id(obj))
-        ctx = IndividualPodPicklerContext.new(obj)
-        dependency_maps: Dict[PodId, Set] = {}
+        ctx = StaticPodPicklerContext.new(obj)
+        dependency_maps: Dict[PodId, Set[PodId]] = {}
+
+        # from pod.stats import PodPicklingStat  # stat_staticppick
+        # stat = PodPicklingStat()  # stat_staticppick
         with self.storage.writer() as writer:
-            while not ctx.obj_queue.empty():
-                this_obj = ctx.obj_queue.get()
-                this_pid = make_pod_id(tid, object_id(this_obj))
+            while not ctx.job_queue.empty():
+                this_job = ctx.job_queue.get()
+                this_pid = make_pod_id(tid, object_id(this_job.obj))
                 this_buffer = io.BytesIO()
-                this_pickler = IndividualPodPickler(
-                    this_obj,
-                    this_pid,
-                    ctx,
-                    this_buffer,
-                    **self.pickle_kwargs,
+                this_pickler = (
+                    BasePickler(this_buffer, **self.pickle_kwargs)
+                    if this_job.is_final
+                    else StaticPodPickler(
+                        this_job.obj,
+                        this_pid,
+                        ctx,
+                        this_buffer,
+                        **self.pickle_kwargs,
+                    )
                 )
-                this_pickler.dump(this_obj)
+                this_pickler.dump(this_job.obj)
                 this_pod_bytes = this_buffer.getvalue()
                 writer.write_pod(this_pid, this_pod_bytes)
-                dependency_maps[this_pid] = this_pickler.get_root_deps()
+                dependency_maps[this_pid] = {} if this_job.is_final else this_pickler.get_root_deps()
+                # stat.append(this_pid, this_job.obj, this_pod_bytes)  # stat_staticppick
             for pod_id, deps in dependency_maps.items():
                 writer.write_dep(pod_id, deps)
+                # stat.fill_dep(pod_id, dependency_maps)  # stat_staticppick
+            # stat.summary()  # stat_staticppick
 
         return pid
 
     def load(self, pid: PodId) -> Object:
         with self.storage.reader([pid]) as reader:
-            return IndividualPodUnpickler.load_from_reader(
+            return StaticPodUnpickler.load_from_reader(
                 pid.tid,
                 reader,
                 pid,
@@ -263,9 +324,9 @@ if __name__ == "__main__":
         raise ValueError(f"Invalid storage_mode= {storage_mode}")
 
     # Initialize pickling
-    pickling_mode = "individual"
-    if pickling_mode == "individual":
-        pod_pickling = IndividualPodPickling(pod_storage)
+    pickling_mode = "statis"
+    if pickling_mode == "statis":
+        pod_pickling = StaticPodPickling(pod_storage)
     else:
         raise ValueError(f"Invalid pickling_mode= {pickling_mode}")
 
