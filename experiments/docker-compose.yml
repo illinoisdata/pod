@@ -10,11 +10,14 @@ services:
     working_dir: /pod
     command: ["/bin/bash"]
   podpsql:
-    image: podpsql
+    image: postgres
     hostname: podpsql
     tty: true
     stdin_open: true
     volumes:
       - ${PWD}:/pod
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     working_dir: /pod
     command: ["postgres", "-p", "5433"]

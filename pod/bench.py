@@ -47,6 +47,8 @@ class BenchArgs:
 
     """ Pod storage """
     pod_dir: Optional[Path] = None  # Path to pod storage root directory.
+    psql_hostname: str = "localhost"  # Hostname where PostgreSQL server is running.
+    psql_port: str = 5432  # Port on the hostname where PostgreSQL server is running.
 
 
 """ Notebook handler/executor """
@@ -173,13 +175,13 @@ class SUT:
         elif args.sut == "pod_file":
             assert args.pod_dir is not None, "pod_file requires --pod_dir"
             return StaticPodPickling(FilePodStorage(args.pod_dir))
-        elif args.sut == "postgres":
-            return StaticPodPickling(PostgreSQLPodStorage("localhost", 5432))
-        elif args.sut == "redis":
+        elif args.sut == "pod_psql":
+            return StaticPodPickling(PostgreSQLPodStorage(args.psql_hostname, args.psql_port))
+        elif args.sut == "pod_redis":
             return StaticPodPickling(RedisPodStorage("localhost", 6379))
-        elif args.sut == "neo4j":
+        elif args.sut == "pod_neo4j":
             return StaticPodPickling(Neo4jPodStorage("neo4j://localhost", 7687))
-        elif args.sut == "mongo":
+        elif args.sut == "pod_mongo":
             return StaticPodPickling(MongoPodStorage("localhost", 27017))
         raise ValueError(f'Invalid SUT name "{args.sut}"')
 

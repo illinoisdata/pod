@@ -16,8 +16,10 @@ from typing import Any, Dict, List, Set, Tuple, cast
 import psycopg2
 import pymongo
 import redis
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from dataclasses_json import dataclass_json
 from neo4j import GraphDatabase
+from loguru import logger
 
 from pod.common import PodId
 
@@ -477,10 +479,17 @@ class PostgreSQLPodStorageReader(PodReader):
 
 class PostgreSQLPodStorage(PodStorage):
     def __init__(self, host: str, port: int) -> None:
+        PostgreSQLPodStorage._create_pod_db_if_has_not(host, port)
         try:
-            self.db_conn = psycopg2.connect(dbname="postgres", user="postgres", host=host, port=port)
+            self.db_conn = psycopg2.connect(
+                dbname="pod", 
+                user="postgres", 
+                password="postgres", 
+                host=host, 
+                port=port,
+            )
         except psycopg2.OperationalError as e:
-            print(f"Error connecting to the database: {e}")
+            logger.error(f"Error connecting to PostgreSQL, {e}")
             raise
         self.cache: Dict[Tuple, io.BytesIO] = {}
         with self.db_conn.cursor() as cursor:
@@ -504,6 +513,25 @@ class PostgreSQLPodStorage(PodStorage):
             """
             )
             self.db_conn.commit()
+
+    @staticmethod
+    def _create_pod_db_if_has_not(host: str, port: int) -> None:
+        try:
+            db_conn = psycopg2.connect(
+                dbname="postgres", 
+                user="postgres", 
+                password="postgres", 
+                host=host, 
+                port=port,
+            )
+            db_conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            cursor = db_conn.cursor()
+            cursor.execute("CREATE DATABASE pod")
+        except psycopg2.errors.DuplicateDatabase:
+            return  # Previous run has already created this database.
+        except psycopg2.OperationalError as e:
+            logger.error(f"Error creating pod database, {e}")
+            raise e
 
     def writer(self) -> PodWriter:
         return PostgreSQLPodStorageWriter(self)
@@ -548,7 +576,8 @@ class PostgreSQLPodStorage(PodStorage):
         return size
 
     def __del__(self):
-        self.db_conn.close()
+        if hasattr(self, "db_conn"):
+            self.db_conn.close()
 
 
 """ Redis storage """
