@@ -128,6 +128,13 @@ class DictPodStorage(PodStorage):
 """ File-based storage: each pod in one file """
 
 
+FilePodStorageIndex = Dict[PodId, int]
+FilePodStoragePodIdSynonym = Dict[PodId, PodId]
+FilePodStoragePodIdDep = Dict[PodId, Set[PodId]]
+FilePodStoragePodPage = Dict[PodId, bytes]
+FilePodStorageDepPage = FilePodStoragePodIdDep
+
+
 @dataclass_json
 @dataclass
 class FilePodStorageStats:
@@ -136,12 +143,37 @@ class FilePodStorageStats:
     pid_synonym_page_count: int
 
 
-FilePodStorageIndex = Dict[PodId, int]
-FilePodStoragePodIdSynonym = Dict[PodId, PodId]
-FilePodStoragePodIdByBytes = Dict[bytes, PodId]
-FilePodStoragePodIdDep = Dict[PodId, Set[PodId]]
-FilePodStoragePodPage = Dict[PodId, bytes]
-FilePodStorageDepPage = FilePodStoragePodIdDep
+@dataclass
+class FilePodStoragePodBytesMemo:
+    max_size: int
+    size: int
+    memo_page: Dict[bytes, PodId]
+
+    @staticmethod
+    def new(max_size: int) -> FilePodStoragePodBytesMemo:
+        return FilePodStoragePodBytesMemo(
+            max_size=max_size,
+            size=0,
+            memo_page={},
+        )
+
+    def __contains__(self, pod_bytes: bytes) -> bool:
+        return pod_bytes in self.memo_page
+
+    def get(self, pod_bytes: bytes) -> PodId:
+        return self.memo_page[pod_bytes]
+
+    def put(self, pod_bytes: bytes, pod_id: PodId):
+        if len(pod_bytes) > self.max_size or pod_bytes in self:
+            return
+        self.memo_page[pod_bytes] = pod_id
+        self.size += len(pod_bytes)
+        while self.size > self.max_size:
+            popped_pod_bytes, _ = self.memo_page.popitem()
+            self.size -= len(popped_pod_bytes)
+
+    def __reduce__(self):
+        return self.__class__, (self.max_size, self.size, self.memo_page)
 
 
 class FilePodStorageWriter(PodWriter):
@@ -159,13 +191,13 @@ class FilePodStorageWriter(PodWriter):
         pod_id: PodId,
         pod_bytes: bytes,
     ) -> None:
-        if pod_bytes in self.storage.pid_by_bytes:
+        if pod_bytes in self.storage.pod_bytes_memo:
             # Save as synonymous pids.
-            same_pod_id = self.storage.pid_by_bytes[pod_bytes]
+            same_pod_id = self.storage.pod_bytes_memo.get(pod_bytes)
             self.new_pid_synonyms[pod_id] = same_pod_id
         else:
             # New pod bytes.
-            self.storage.pid_by_bytes[pod_bytes] = pod_id
+            self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
 
             # Write to buffer.
             self.pod_page_buffer[pod_id] = pod_bytes
@@ -247,13 +279,13 @@ class FilePodStorage(PodStorage):
         )
         self.pid_index: FilePodStorageIndex = {}
         self.pid_synonym: FilePodStoragePodIdSynonym = {}
-        self.pid_by_bytes: FilePodStoragePodIdByBytes = {}  # TODO: Move out of memor.
+        self.pod_bytes_memo: FilePodStoragePodBytesMemo = FilePodStoragePodBytesMemo.new(2_000_000_000)
         self.pid_deps: FilePodStoragePodIdDep = {}
         if self.is_init():
             self.stats = self.reload_stats()
             self.pid_index = self.reload_index()
             self.pid_synonym = self.reload_pid_synonym()
-            self.pid_by_bytes = self.reload_pid_by_bytes()  # TODO: Reload as needed.
+            self.reload_pod_bytes_memo()
             self.pid_deps = self.reload_pid_deps()
 
     def writer(self) -> PodWriter:
@@ -348,14 +380,12 @@ class FilePodStorage(PodStorage):
                 pid_synonym.update(pickle.load(f))
         return pid_synonym
 
-    def reload_pid_by_bytes(self) -> FilePodStoragePodIdByBytes:
-        pid_by_bytes: FilePodStoragePodIdByBytes = {}
+    def reload_pod_bytes_memo(self):
         for page_path in self.root_dir.glob("pod_*.pkl"):
             with open(page_path, "rb") as f:
                 page = pickle.load(f)
             for pod_id, pod_bytes in page.items():
-                pid_by_bytes[pod_bytes] = pod_id
-        return pid_by_bytes
+                self.pod_bytes_memo.put(pod_bytes, pod_id)
 
     def reload_pid_deps(self) -> FilePodStoragePodIdDep:
         pid_deps: FilePodStoragePodIdDep = {}
