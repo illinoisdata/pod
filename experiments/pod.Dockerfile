@@ -3,6 +3,10 @@ FROM ubuntu:22.04
 RUN apt-get update
 RUN apt-get upgrade --yes
 
+# Install tools
+RUN apt-get install build-essential make vim tmux git htop sysstat ioping nfs-common vmtouch --yes
+RUN DEBIAN_FRONTEND="noninteractive" apt-get install postgresql --yes
+
 # Install Python
 RUN apt-get install python3.11 python-is-python3 python3-pip --yes
 RUN python -m pip install --upgrade pip

@@ -34,7 +34,7 @@ function get_nb_path() {
             return 0
         fi
     done
-    echo "ERROR: Invalid NBNAME $_NBNAME"
+    echo "ERROR: Invalid NBNAME $_NBNAME from [ ${NB_KEYS[*]} ]"
     exit 1
 }
 
@@ -46,6 +46,7 @@ SUTS=(
     "snp" 
     "imm"
     "pfl"
+    "ppg"
 )
 
 function get_sut_args() {
@@ -60,8 +61,11 @@ function get_sut_args() {
     elif [[ $_SUT == "pfl" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR}"
+    elif [[ $_SUT == "ppg" ]]
+    then
+        sut_args="--sut pod_psql --psql_hostname podpsql --psql_port 5433"
     else
-        echo "ERROR: Invalid SUT $_SUT"
+        echo "ERROR: Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
     fi
     eval $retVal="'${sut_args}'"
@@ -79,8 +83,14 @@ function prepare_sut() {
     elif [[ $_SUT == "pfl" ]]
     then
         rm -r ${POD_DIR}
+    elif [[ $_SUT == "ppg" ]]
+    then
+        export PGPASSWORD=postgres
+        psql --host=podpsql --port=5433 \
+            -U postgres -d postgres \
+            -c "DROP DATABASE IF EXISTS pod;"
     else
-        echo "ERROR: Invalid SUT $_SUT"
+        echo "ERROR: Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
     fi
     return 0
