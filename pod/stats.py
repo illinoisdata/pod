@@ -43,6 +43,12 @@ def strf_throughput(tput: float) -> str:
     return f"{tput:.1f} op/s"
 
 
+def strf_percent(percent: float) -> str:
+    if percent >= 10:
+        return f"{percent:5.1f} %"
+    return f"{percent:5.3ff} %"
+
+
 @dataclass_json
 @dataclass
 class DumpStat:
@@ -213,3 +219,30 @@ class PodPicklingStat:
                 f"avg_deps= {type_stat.num_deps / type_stat.nth:6.1f}, "
                 f"avg_totds= {type_stat.num_recursive_deps / type_stat.nth:6.1f}"
             )
+
+
+class PodCacheStat:
+    def __init__(self) -> None:
+        self.num_io: int = 0
+        self.io_bytes: int = 0
+        self.total_read_bytes: int = 0
+        self.unique_read_bytes: int = 0
+        self.unique_key: Set[str] = set()
+
+    def add_io(self, io_bytes: int) -> None:
+        self.num_io += 1
+        self.io_bytes += io_bytes
+
+    def add_read(self, key: str, read_bytes: int) -> None:
+        self.total_read_bytes += read_bytes
+        if key not in self.unique_key:
+            self.unique_read_bytes += read_bytes
+            self.unique_key.add(key)
+
+    def summary(self) -> None:
+        save_ratio = self.total_read_bytes / self.io_bytes
+        eff_io = 100.0 * self.unique_read_bytes / self.io_bytes
+        print(
+            f"nio: {self.num_io:3}, io= {strf_storage(self.io_bytes)}, "
+            f"eff_io= {strf_percent(eff_io)}, save_ratio= {save_ratio:.3f}"
+        )

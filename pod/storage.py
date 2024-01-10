@@ -250,11 +250,17 @@ class FilePodStorageWriter(PodWriter):
 
 class FilePodStorageReader(PodReader):
     def __init__(self, storage: FilePodStorage, page_idxs: Set[int]) -> None:
+        # from pod.stats import PodCacheStat  # stat_cache_pfl
+        # self.cache_stat = PodCacheStat()  # stat_cache_pfl
+
         self.storage = storage
         self.page_cache: Dict[int, FilePodStoragePodPage] = {}
         for page_idx in page_idxs:
             with open(self.storage.pod_page_path(page_idx), "rb") as f:
                 self.page_cache[page_idx] = pickle.load(f)
+                # self.cache_stat.add_io(  # stat_cache_pfl
+                # sum(len(pod_bytes)  # stat_cache_pfl
+                # for _, pod_bytes in self.page_cache[page_idx].items()))  # stat_cache_pfl
 
     def read(self, pod_id: PodId) -> io.IOBase:
         resolved_pid = self.storage.resolve_pid_synonym(pod_id)
@@ -263,10 +269,17 @@ class FilePodStorageReader(PodReader):
         if page_idx not in self.page_cache:
             with open(page_path, "rb") as f:
                 self.page_cache[page_idx] = pickle.load(f)
+                # self.cache_stat.add_io(  # stat_cache_pfl
+                # sum(len(pod_bytes)  # stat_cache_pfl
+                # for _, pod_bytes in self.page_cache[page_idx].items()))  # stat_cache_pfl
         page = self.page_cache[page_idx]
         if resolved_pid not in page:
             raise ValueError(f"False index pointing {pod_id} ){resolved_pid}) to {page_path}: {page}")
+        # self.cache_stat.add_read(str(resolved_pid), len(page[resolved_pid]))  # stat_cache_pfl
         return io.BytesIO(page[resolved_pid])
+
+    # def __del__(self) -> None:  # stat_cache_pfl
+    # self.cache_stat.summary()  # stat_cache_pfl
 
 
 class FilePodStorage(PodStorage):
