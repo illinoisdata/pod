@@ -48,7 +48,7 @@ class BenchArgs:
     """ Pod storage """
     pod_dir: Optional[Path] = None  # Path to pod storage root directory.
     psql_hostname: str = "localhost"  # Hostname where PostgreSQL server is running.
-    psql_port: str = 5432  # Port on the hostname where PostgreSQL server is running.
+    psql_port: int = 5432  # Port on the hostname where PostgreSQL server is running.
 
 
 """ Notebook handler/executor """
