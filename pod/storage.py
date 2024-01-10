@@ -479,15 +479,19 @@ class PostgreSQLPodStorageReader(PodReader):
         self.storage = storage
 
     def read(self, pod_id: PodId) -> io.IOBase:
-        if (pod_id.tid, pod_id.oid) in self.storage.cache:
-            return self.storage.cache[(pod_id.tid, pod_id.oid)]
-        with self.storage.db_conn.cursor() as cursor:
-            cursor.execute("SELECT pod_bytes FROM pod_storage WHERE tid = %s AND oid = %s", (pod_id.tid, pod_id.oid))
-            result = cursor.fetchone()
-            if result is None:
-                raise ValueError("No data found for the given pod_id")
-            pod_bytes = result[0]
-        return io.BytesIO(pod_bytes)
+        if (pod_id.tid, pod_id.oid) not in self.storage.cache:
+            # logger.warning(f"Cache miss {pod_id}")
+            with self.storage.db_conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT pod_bytes FROM pod_storage WHERE tid = %s AND oid = %s",
+                    (pod_id.tid, pod_id.oid),
+                )
+                result = cursor.fetchone()
+                if result is None:
+                    raise ValueError("No data found for the given pod_id")
+                pod_bytes = result[0]
+            self.storage.cache[(pod_id.tid, pod_id.oid)] = io.BytesIO(pod_bytes)
+        return self.storage.cache[(pod_id.tid, pod_id.oid)]
 
 
 class PostgreSQLPodStorage(PodStorage):
