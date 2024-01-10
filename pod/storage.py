@@ -16,10 +16,10 @@ from typing import Any, Dict, List, Set, Tuple, cast
 import psycopg2
 import pymongo
 import redis
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from dataclasses_json import dataclass_json
-from neo4j import GraphDatabase
 from loguru import logger
+from neo4j import GraphDatabase
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 from pod.common import PodId
 
@@ -482,10 +482,10 @@ class PostgreSQLPodStorage(PodStorage):
         PostgreSQLPodStorage._create_pod_db_if_has_not(host, port)
         try:
             self.db_conn = psycopg2.connect(
-                dbname="pod", 
-                user="postgres", 
-                password="postgres", 
-                host=host, 
+                dbname="pod",
+                user="postgres",
+                password="postgres",
+                host=host,
                 port=port,
             )
         except psycopg2.OperationalError as e:
@@ -518,10 +518,10 @@ class PostgreSQLPodStorage(PodStorage):
     def _create_pod_db_if_has_not(host: str, port: int) -> None:
         try:
             db_conn = psycopg2.connect(
-                dbname="postgres", 
-                user="postgres", 
-                password="postgres", 
-                host=host, 
+                dbname="postgres",
+                user="postgres",
+                password="postgres",
+                host=host,
                 port=port,
             )
             db_conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
