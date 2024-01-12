@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import signal
 import sys
 import time
 import traceback
@@ -161,6 +162,22 @@ class NotebookExecutor:
             yield cell, self.the_globals, self.the_locals
 
 
+class BlockTimeout:
+    def __init__(self, seconds: int, error_message: str = "Timeout"):
+        self.seconds = seconds
+        self.error_message = error_message
+
+    def handle_timeout(self, signum, frame):
+        raise TimeoutError(f"Timeout ({self.seconds} seconds)")
+
+    def __enter__(self):
+        signal.signal(signal.SIGALRM, self.handle_timeout)
+        signal.alarm(self.seconds)
+
+    def __exit__(self, type, value, traceback):
+        signal.alarm(0)
+
+
 """ Systems under test """
 
 
@@ -223,11 +240,19 @@ def run_exp1(argv: List[str]) -> None:
         )
     logger.info(f"Collected pids {pids}")
 
+    # Save partial results (in case of load failure).
+    result_path = expstat.save(args.result_dir / args.expname)
+    logger.info(f"Saved ExpStat (dump only) to {result_path}")
+
     # Load random steps.
     for nth, idx in enumerate(random.choices(range(len(pids)), k=args.exp1_num_loads)):
         # Load state.
         load_start_ts = time.time()
-        _ = sut.load(pids[idx])
+        try:
+            with BlockTimeout(1):
+                _ = sut.load(pids[idx])
+        except TimeoutError as e:
+            logger.warning(f"{e}")
         load_stop_ts = time.time()
 
         # Record measurements.
