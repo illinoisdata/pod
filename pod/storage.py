@@ -142,6 +142,7 @@ FilePodStorageDepPage = FilePodStoragePodIdDep
 class FilePodStorageStats:
     pod_page_count: int
     dep_page_count: int
+    pid_index_page_count: int
     pid_synonym_page_count: int
 
 
@@ -183,6 +184,7 @@ class FilePodStorageWriter(PodWriter):
 
     def __init__(self, storage: FilePodStorage) -> None:
         self.storage = storage
+        self.new_pid_index: FilePodStorageIndex = {}
         self.new_pid_synonyms: Dict[PodId, PodId] = {}
         self.pod_page_buffer: FilePodStoragePodPage = {}
         self.dep_page_buffer: FilePodStorageDepPage = {}
@@ -221,7 +223,7 @@ class FilePodStorageWriter(PodWriter):
             pickle.dump(self.pod_page_buffer, f)
 
         # Update index.
-        self.storage.update_index({pid: page_idx for pid in self.pod_page_buffer})
+        self.new_pid_index.update({pid: page_idx for pid in self.pod_page_buffer})
 
         # Reset buffer state.
         self.pod_page_buffer = {}
@@ -240,12 +242,14 @@ class FilePodStorageWriter(PodWriter):
         self.dep_page_buffer = {}
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        if len(self.new_pid_synonyms) > 0:
-            self.storage.update_pid_synonym(self.new_pid_synonyms)
         if len(self.pod_page_buffer) > 0:
             self.flush_pod()
         if len(self.dep_page_buffer) > 0:
             self.flush_dep()
+        if len(self.new_pid_index) > 0:
+            self.storage.update_index(self.new_pid_index)
+        if len(self.new_pid_synonyms) > 0:
+            self.storage.update_pid_synonym(self.new_pid_synonyms)
 
 
 class FilePodStorageReader(PodReader):
@@ -290,6 +294,7 @@ class FilePodStorage(PodStorage):
         self.stats = FilePodStorageStats(
             pod_page_count=0,
             dep_page_count=0,
+            pid_index_page_count=0,
             pid_synonym_page_count=0,
         )
         self.pid_index: FilePodStorageIndex = {}
@@ -339,6 +344,12 @@ class FilePodStorage(PodStorage):
         self.write_stats()
         return page_idx
 
+    def next_pid_index_page_idx(self) -> int:
+        page_idx = self.stats.pid_index_page_count
+        self.stats.pid_index_page_count += 1
+        self.write_stats()
+        return page_idx
+
     def next_pid_synonym_page_idx(self) -> int:
         page_idx = self.stats.pid_synonym_page_count
         self.stats.pid_synonym_page_count += 1
@@ -354,8 +365,8 @@ class FilePodStorage(PodStorage):
     def stats_path(self) -> Path:
         return self.root_dir / "stats.json"
 
-    def index_path(self) -> Path:
-        return self.root_dir / "index.pkl"
+    def index_path(self, page_idx: int) -> Path:
+        return self.root_dir / f"index_{page_idx}.pkl"
 
     def pid_synonym_path(self, page_idx: int) -> Path:
         return self.root_dir / f"pid_synonym_{page_idx}.pkl"
@@ -368,17 +379,24 @@ class FilePodStorage(PodStorage):
         with open(self.stats_path(), "r") as f:
             return FilePodStorageStats.from_json(f.read())  # type: ignore
 
-    def update_index(self, new_maps: Dict[PodId, int]) -> None:
-        self.pid_index.update(new_maps)
-        with open(self.index_path(), "wb") as f:
-            pickle.dump(self.pid_index, f)
+    def update_index(self, new_pid_index: FilePodStorageIndex) -> None:
+        self.pid_index.update(new_pid_index)
+        self.write_index(new_pid_index)
 
     def search_index(self, pid: PodId) -> int:
         return self.pid_index[pid]
 
+    def write_index(self, new_pid_index: FilePodStorageIndex) -> None:
+        page_idx = self.next_pid_index_page_idx()
+        with open(self.index_path(page_idx), "wb") as f:
+            pickle.dump(new_pid_index, f)
+
     def reload_index(self) -> FilePodStorageIndex:
-        with open(self.index_path(), "rb") as f:
-            return pickle.load(f)
+        pid_index: FilePodStorageIndex = {}
+        for page_idx in range(self.stats.pid_index_page_count):
+            with open(self.index_path(page_idx), "rb") as f:
+                pid_index.update(pickle.load(f))
+        return pid_index
 
     def update_pid_synonym(self, new_pid_synonyms: FilePodStoragePodIdSynonym) -> None:
         self.pid_synonym.update(new_pid_synonyms)
@@ -416,7 +434,7 @@ class FilePodStorage(PodStorage):
         return pid_deps
 
     def is_init(self) -> bool:
-        return self.stats_path().exists() and self.index_path().exists()
+        return self.stats_path().exists() and self.index_path(0).exists()
 
 
 """ PostgreSQL storage: each pod as an entry in a database """
