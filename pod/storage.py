@@ -307,8 +307,10 @@ class FilePodStorage(PodStorage):
         return FilePodStorageWriter(self)
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
+        seen_pid: Set[PodId] = set()
         pid_queue: Queue[PodId] = Queue()
         for pid in hint_pod_ids:
+            seen_pid.add(pid)
             pid_queue.put(pid)
         page_idxs: Set[int] = set()
         while not pid_queue.empty():
@@ -317,7 +319,9 @@ class FilePodStorage(PodStorage):
             page_idx = self.search_index(resolved_pid)
             page_idxs.add(page_idx)
             for dep_pid in self.pid_deps[pid]:
-                pid_queue.put(dep_pid)
+                if dep_pid not in seen_pid:
+                    seen_pid.add(dep_pid)
+                    pid_queue.put(dep_pid)
         return FilePodStorageReader(self, page_idxs)
 
     def estimate_size(self) -> int:

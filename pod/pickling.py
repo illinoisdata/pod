@@ -196,37 +196,58 @@ class StaticPodPickler(BasePickler):
         return self.root_deps
 
 
+@dataclass
+class StaticPodUnpicklerContext:
+    tid: TimeId
+    reader: PodReader
+    unpickler_by_oid: Dict[ObjectId, StaticPodUnpickler]
+
+
 class StaticPodUnpickler(PodUnpickler):
-    def __init__(self, tid: TimeId, reader: PodReader, file: io.IOBase, *args, **kwargs) -> None:
+    def __init__(self, ctx: StaticPodUnpicklerContext, file: io.IOBase, *args, **kwargs) -> None:
         PodUnpickler.__init__(self, file, *args, **kwargs)
-        self.tid = tid
-        self.reader = reader
+        self.ctx = ctx
         self.args = args
         self.kwargs = kwargs
 
     def clone_new(self, file: io.IOBase) -> StaticPodUnpickler:
-        return StaticPodUnpickler(self.tid, self.reader, file, *self.args, **self.kwargs)
+        return StaticPodUnpickler(self.ctx, file, *self.args, **self.kwargs)
 
     def copy_into(self, new_self: PodUnpickler):
         PodUnpickler.copy_into(self, new_self)
-        new_self.tid = self.tid
-        new_self.reader = self.reader
+        new_self.ctx = self.ctx
 
     def pod_persistent_load(self, oid: ObjectId) -> Object:
-        # TODO: Load in topological order?
-        with self.reader.read(make_pod_id(self.tid, oid)) as obj_io:
-            return self.copy_new(obj_io).load()
+        # TODO: Load in topological order without recursion?
+        if oid in self.ctx.unpickler_by_oid:
+            try:
+                # HACK: Assume Python-based unpickler has created the target object by now.
+                return self.ctx.unpickler_by_oid[oid].stack[0]
+            except AttributeError:
+                raise AttributeError(
+                    "Pod under experimment expects Python-based unpickler (e.g., pickle.Unpickler = pickle._Unpickler)."
+                )
+        with self.ctx.reader.read(make_pod_id(self.ctx.tid, oid)) as obj_io:
+            new_self = self.copy_new(obj_io)
+            self.ctx.unpickler_by_oid[oid] = new_self
+            return new_self.load()
 
     @staticmethod
-    def load_from_reader(tid: TimeId, reader: PodReader, pid: PodId, *args, **kwargs) -> Object:
+    def load_from_reader(reader: PodReader, pid: PodId, *args, **kwargs) -> Object:
         with reader.read(pid) as obj_io:
-            return StaticPodUnpickler(
-                tid,
-                reader,
+            ctx = StaticPodUnpicklerContext(
+                tid=pid.tid,
+                reader=reader,
+                unpickler_by_oid={},
+            )
+            unpickler = StaticPodUnpickler(
+                ctx,
                 obj_io,
                 *args,
                 **kwargs,
-            ).load()
+            )
+            ctx.unpickler_by_oid[pid.oid] = unpickler
+            return unpickler.load()
 
 
 class StaticPodPickling(PodPickling):
@@ -273,7 +294,6 @@ class StaticPodPickling(PodPickling):
     def load(self, pid: PodId) -> Object:
         with self.storage.reader([pid]) as reader:
             return StaticPodUnpickler.load_from_reader(
-                pid.tid,
                 reader,
                 pid,
                 **self.pickle_kwargs,
