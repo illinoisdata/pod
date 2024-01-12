@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
+import matplotlib
 import matplotlib.pyplot as plt
 import simple_parsing
 from loguru import logger
@@ -20,6 +21,19 @@ python pod/plot.py exp1batch --batch_args \
     rmlist:result/exp1_snp_itsttime,result/exp1_imm_rmlist,result/exp1_pfl_rmlist \
     storesfg:result/exp1_snp_storesfg
 """
+
+
+def set_fontsize(ax: matplotlib.axes.Axes, fontsize: float) -> None:
+    for item in [
+        ax.title,
+        ax.xaxis.label,
+        ax.yaxis.label,
+        ax.xaxis.get_offset_text(),
+        ax.yaxis.get_offset_text(),
+        *ax.get_xticklabels(),
+        *ax.get_yticklabels(),
+    ]:
+        item.set_fontsize(fontsize)
 
 
 @dataclass
@@ -111,7 +125,7 @@ def plot_exp1batch(argv: List[str]) -> None:
     logger.info(args)
 
     # Plot exp1 (dump latency + storage + load latency).
-    N, M, R, SZ = 4, len(args.singles), 2.0, 2.0
+    N, M, R, SZ = 4, len(args.singles), 2.5, 0.8
     fig, axes = plt.subplots(nrows=N, ncols=M, figsize=(SZ * R * M, SZ * N))
 
     for single, axs in zip(args.singles, axes.T):
@@ -131,18 +145,18 @@ def plot_exp1batch(argv: List[str]) -> None:
         labels: List[str] = []
         dump_times: List[List[float]] = []
         load_times: List[List[float]] = []
-        dump_final_storage: List[int] = []
-        dump_storage_incs: List[List[int]] = []
+        dump_final_storage_gb: List[float] = []
+        dump_storage_inc_gb: List[List[float]] = []
         for expname, result in all_results.items():
             labels.append(expname)
             dump_times.append([stat.time_s for stat in result.dumps])
             load_times.append([stat.time_s for stat in result.loads])
-            dump_final_storage.append(result.dumps[-1].storage_b)
-            dump_storage = [stat.storage_b for stat in result.dumps]
-            dump_storage_incs.append(
+            dump_final_storage_gb.append(result.dumps[-1].storage_b / 1e9)
+            dump_storage_gb = [stat.storage_b / 1e9 for stat in result.dumps]
+            dump_storage_inc_gb.append(
                 [
-                    dump_storage[idx] if idx == 0 else dump_storage[idx] - dump_storage[idx - 1]
-                    for idx in range(len(dump_storage))
+                    dump_storage_gb[idx] if idx == 0 else dump_storage_gb[idx] - dump_storage_gb[idx - 1]
+                    for idx in range(len(dump_storage_gb))
                 ]
             )
 
@@ -158,15 +172,18 @@ def plot_exp1batch(argv: List[str]) -> None:
 
         # Plot dump stroage increments.
         ax = axs[2]
-        ax.barh(list(range(len(dump_final_storage))), dump_final_storage)
-        ax.set_xlabel("Storage (bytes)")
-        ax.set_yticks(list(range(len(dump_final_storage))))
+        ax.barh(list(range(len(dump_final_storage_gb))), dump_final_storage_gb)
+        ax.set_xlabel("Storage (GB)")
+        ax.set_yticks(list(range(len(dump_final_storage_gb))))
         ax.set_yticklabels(labels)
 
         # Plot dump stroage increments.
         ax = axs[3]
-        ax.boxplot(dump_storage_incs, labels=labels, vert=False)
-        ax.set_xlabel("Storage increments (bytes)")
+        ax.boxplot(dump_storage_inc_gb, labels=labels, vert=False)
+        ax.set_xlabel("Storage inc. (GB)")
+
+    for ax in axes.flatten():
+        set_fontsize(ax, 7)
 
     fig.tight_layout()
     plt.show()
