@@ -12,6 +12,8 @@ from pod.common import Object, PodId
 
 
 def strf_deltatime(time_s: float) -> str:
+    if time_s == float("inf"):
+        return "inf"
     if time_s >= 3600.0:
         return f"{time_s // 3600:.0f}:{(time_s % 3600) // 60:.0f}:{time_s % 60:.0f}"
     if time_s >= 60.0:
@@ -105,8 +107,8 @@ class ExpStat:
         )
 
     def summary(self) -> None:
-        dump_avg_t_s = self.dump_sum_t_s / len(self.dumps)
-        load_avg_t_s = self.load_sum_t_s / len(self.loads)
+        dump_avg_t_s = float("inf") if len(self.dumps) == 0 else self.dump_sum_t_s / len(self.dumps)
+        load_avg_t_s = float("inf") if len(self.loads) == 0 else self.load_sum_t_s / len(self.loads)
         logger.info(
             f"{len(self.dumps)} dumps"
             f", avgt= {strf_deltatime(dump_avg_t_s)} ({strf_throughput(1.0/dump_avg_t_s)}), "
