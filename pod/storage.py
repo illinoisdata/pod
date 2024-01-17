@@ -441,10 +441,13 @@ class FilePodStorage(PodStorage):
 
 
 class PostgreSQLPodStorageWriter(PodWriter):
+    CHUNK_SIZE = 1_000_000_00  # 100 MB
+    FLUSH_SIZE = 500_000  # 500 KB
     def __init__(self, storage: PostgreSQLPodStorage) -> None:
         self.storage = storage
         self.storage_buffer: List[Tuple] = []
         self.dependency_buffer: List[Tuple] = []
+        self.buf_size = 0
 
     def __enter__(self):
         return self
@@ -458,17 +461,22 @@ class PostgreSQLPodStorageWriter(PodWriter):
             self.storage.db_conn.commit()
 
     def flush_storage(self):
+        if self.buf_size == 0:
+            return
         with self.storage.db_conn.cursor() as cursor:
-            values_str = ",".join(cursor.mogrify("(%s, %s, %s)", x).decode() for x in self.storage_buffer)
+            values_str = ",".join(cursor.mogrify("(%s, %s, %s, %s)", x).decode() for x in self.storage_buffer)
             query = f"""
-                INSERT INTO pod_storage (tid, oid, pod_bytes)
+                INSERT INTO pod_storage (tid, oid, chunk, pod_bytes)
                 VALUES {values_str}
-                ON CONFLICT (tid, oid) DO UPDATE SET pod_bytes = EXCLUDED.pod_bytes;
+                ON CONFLICT (tid, oid, chunk) DO UPDATE SET pod_bytes = EXCLUDED.pod_bytes;
             """
             cursor.execute(query)
         self.storage_buffer = []
+        self.buf_size = 0
 
     def flush_dependencies(self):
+        if len(self.dependency_buffer) == 0:
+            return
         with self.storage.db_conn.cursor() as cursor:
             # Constructing insert query
             insert_values = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x).decode() for x in self.dependency_buffer)
@@ -486,7 +494,22 @@ class PostgreSQLPodStorageWriter(PodWriter):
         pod_id: PodId,
         pod_bytes: bytes,
     ) -> None:
-        self.storage_buffer.append((pod_id.tid, pod_id.oid, pod_bytes))
+        for i in range(0, len(pod_bytes), PostgreSQLPodStorageWriter.CHUNK_SIZE):
+            if i == 0:
+                self.buf_size += min(len(pod_bytes), PostgreSQLPodStorageWriter.CHUNK_SIZE)
+            else:
+                self.buf_size += min(PostgreSQLPodStorageWriter.CHUNK_SIZE, len(pod_bytes) - i)
+                if self.buf_size < 0:
+                    print("BELOW 0")
+                    print(len(pod_bytes))
+                    print(i)
+            self.storage_buffer.append((pod_id.tid, pod_id.oid, int(i/PostgreSQLPodStorageWriter.CHUNK_SIZE), pod_bytes[i:i+PostgreSQLPodStorageWriter.CHUNK_SIZE]))
+
+            if self.buf_size > PostgreSQLPodStorageWriter.FLUSH_SIZE:
+                self.flush_storage()
+                self.flush_dependencies()
+        
+            
 
     def write_dep(
         self,
@@ -505,15 +528,17 @@ class PostgreSQLPodStorageReader(PodReader):
             # logger.warning(f"Cache miss {pod_id}")
             with self.storage.db_conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT pod_bytes FROM pod_storage WHERE tid = %s AND oid = %s",
+                    "SELECT pod_bytes FROM pod_storage WHERE tid = %s AND oid = %s ORDER BY chunk",
                     (pod_id.tid, pod_id.oid),
                 )
-                result = cursor.fetchone()
+                result = cursor.fetchall()
                 if result is None:
                     raise ValueError("No data found for the given pod_id")
-                pod_bytes = result[0]
-            self.storage.cache[(pod_id.tid, pod_id.oid)] = io.BytesIO(pod_bytes)
-        return self.storage.cache[(pod_id.tid, pod_id.oid)]
+                pod_bytes = b""
+                for item in result:
+                    pod_bytes += item[0]
+            self.storage.cache[(pod_id.tid, pod_id.oid)] = pod_bytes
+        return io.BytesIO(self.storage.cache[(pod_id.tid, pod_id.oid)])
 
 
 class PostgreSQLPodStorage(PodStorage):
@@ -538,16 +563,15 @@ class PostgreSQLPodStorage(PodStorage):
                     tid BIGINT,
                     oid BIGINT,
                     pod_bytes BYTEA,
-                    PRIMARY KEY (tid, oid)
+                    chunk INTEGER,
+                    PRIMARY KEY (tid, oid, chunk)
                 );
                 CREATE TABLE IF NOT EXISTS pod_dependencies (
                     pod_id_tid BIGINT,
                     pod_id_oid BIGINT,
                     dep_pid_tid BIGINT,
                     dep_pid_oid BIGINT,
-                    PRIMARY KEY (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid),
-                    FOREIGN KEY (pod_id_tid, pod_id_oid) REFERENCES pod_storage(tid, oid),
-                    FOREIGN KEY (dep_pid_tid, dep_pid_oid) REFERENCES pod_storage(tid, oid)
+                    PRIMARY KEY (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid)
                 );
             """
             )
@@ -588,19 +612,22 @@ class PostgreSQLPodStorage(PodStorage):
                 FROM pod_dependencies pd
                 INNER JOIN dependency_chain dc ON pd.pod_id_tid = dc.tid AND pd.pod_id_oid = dc.oid
             )
-            SELECT ps.tid, ps.oid, ps.pod_bytes
+            SELECT ps.tid, ps.oid, ps.pod_bytes, ps.chunk
             FROM (
                 SELECT tid, oid FROM dependency_chain
                 UNION
                 SELECT tid, oid FROM pod_storage WHERE (tid, oid) IN %s
             ) AS combined
-            INNER JOIN pod_storage ps ON combined.tid = ps.tid AND combined.oid = ps.oid;
+            INNER JOIN pod_storage ps ON combined.tid = ps.tid AND combined.oid = ps.oid
+            ORDER BY (ps.tid, ps.oid, ps.chunk);
             """
             cursor.execute(query, (hint_tid_oid_tup, hint_tid_oid_tup))
             results = cursor.fetchall()
             for row in results:
-                tid, oid, pod_bytes = row
-                self.cache[(tid, oid)] = io.BytesIO(pod_bytes)
+                tid, oid, pod_bytes, chunk = row
+                if (tid, oid) not in self.cache:
+                    self.cache[(tid, oid)] = b""
+                self.cache[(tid, oid)] += pod_bytes
         return PostgreSQLPodStorageReader(self)
 
     def estimate_size(self) -> int:
