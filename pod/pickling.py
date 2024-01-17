@@ -5,6 +5,7 @@ Pickle protocols based on correlated key-value storages.
 from __future__ import annotations
 
 import io
+import os
 from dataclasses import dataclass
 from queue import Queue
 from types import CodeType, FunctionType, ModuleType, NoneType
@@ -196,6 +197,39 @@ class StaticPodPickler(BasePickler):
         return self.root_deps
 
 
+class StaticPodPicklingMetadata:
+    ROOT_MEMO_ID_BYTES = 8
+
+    def __init__(self, root_memo_id: int) -> None:
+        self.root_memo_id = root_memo_id  # For self-referential objects.
+
+    @staticmethod
+    def new(
+        pickler: BasePickler,
+        job: StaticPodPicklerJob,
+    ) -> StaticPodPicklingMetadata:
+        return StaticPodPicklingMetadata(
+            root_memo_id=pickler.memo[id(job.obj)][0],
+        )
+
+    def write(self, buffer: io.IOBase) -> None:
+        buffer.write(self.root_memo_id.to_bytes(StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES, byteorder="big"))
+
+    @staticmethod
+    def read_from(buffer: io.IOBase) -> StaticPodPicklingMetadata:
+        # Keep in sync with write.
+        orig_pos = buffer.tell()
+        buffer.seek(-StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES, os.SEEK_END)
+        root_memo_id = int.from_bytes(buffer.read(StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES), byteorder="big")
+        buffer.seek(orig_pos, os.SEEK_SET)
+        return StaticPodPicklingMetadata(
+            root_memo_id=root_memo_id,
+        )
+
+    def __reduce__(self):
+        return self.__class__, (self.obj_bytes, self.root_memo_id)
+
+
 @dataclass
 class StaticPodUnpicklerContext:
     tid: TimeId
@@ -209,6 +243,7 @@ class StaticPodUnpickler(PodUnpickler):
         self.ctx = ctx
         self.args = args
         self.kwargs = kwargs
+        self.meta = StaticPodPicklingMetadata.read_from(file)
 
     def clone_new(self, file: io.IOBase) -> StaticPodUnpickler:
         return StaticPodUnpickler(self.ctx, file, *self.args, **self.kwargs)
@@ -222,7 +257,7 @@ class StaticPodUnpickler(PodUnpickler):
         if oid in self.ctx.unpickler_by_oid:
             try:
                 # HACK: Assume Python-based unpickler has created the target object by now.
-                return self.ctx.unpickler_by_oid[oid].stack[0]
+                return self.ctx.unpickler_by_oid[oid].root_obj()
             except AttributeError:
                 raise AttributeError(
                     "Pod under experimment expects Python-based unpickler (e.g., pickle.Unpickler = pickle._Unpickler)."
@@ -231,6 +266,9 @@ class StaticPodUnpickler(PodUnpickler):
             new_self = self.copy_new(obj_io)
             self.ctx.unpickler_by_oid[oid] = new_self
             return new_self.load()
+
+    def root_obj(self) -> Object:
+        return self.memo[self.meta.root_memo_id]
 
     @staticmethod
     def load_from_reader(reader: PodReader, pid: PodId, *args, **kwargs) -> Object:
@@ -280,6 +318,7 @@ class StaticPodPickling(PodPickling):
                     )
                 )
                 this_pickler.dump(this_job.obj)
+                StaticPodPicklingMetadata(root_memo_id=this_pickler.memo[id(this_job.obj)][0]).write(this_buffer)
                 this_pod_bytes = this_buffer.getvalue()
                 writer.write_pod(this_pid, this_pod_bytes)
                 dependency_maps[this_pid] = {} if this_job.is_final else this_pickler.get_root_deps()
