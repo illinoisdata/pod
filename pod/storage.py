@@ -443,6 +443,7 @@ class FilePodStorage(PodStorage):
 class PostgreSQLPodStorageWriter(PodWriter):
     CHUNK_SIZE = 1_000_000_00  # 100 MB
     FLUSH_SIZE = 500_000  # 500 KB
+
     def __init__(self, storage: PostgreSQLPodStorage) -> None:
         self.storage = storage
         self.storage_buffer: List[Tuple] = []
@@ -503,13 +504,18 @@ class PostgreSQLPodStorageWriter(PodWriter):
                     print("BELOW 0")
                     print(len(pod_bytes))
                     print(i)
-            self.storage_buffer.append((pod_id.tid, pod_id.oid, int(i/PostgreSQLPodStorageWriter.CHUNK_SIZE), pod_bytes[i:i+PostgreSQLPodStorageWriter.CHUNK_SIZE]))
+            self.storage_buffer.append(
+                (
+                    pod_id.tid,
+                    pod_id.oid,
+                    int(i / PostgreSQLPodStorageWriter.CHUNK_SIZE),
+                    pod_bytes[i: i + PostgreSQLPodStorageWriter.CHUNK_SIZE],
+                )
+            )
 
             if self.buf_size > PostgreSQLPodStorageWriter.FLUSH_SIZE:
                 self.flush_storage()
                 self.flush_dependencies()
-        
-            
 
     def write_dep(
         self,
@@ -555,7 +561,7 @@ class PostgreSQLPodStorage(PodStorage):
         except psycopg2.OperationalError as e:
             logger.error(f"Error connecting to PostgreSQL, {e}")
             raise
-        self.cache: Dict[Tuple, io.BytesIO] = {}
+        self.cache: Dict[Tuple, bytes] = {}
         with self.db_conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -603,23 +609,56 @@ class PostgreSQLPodStorage(PodStorage):
         hint_tid_oid_tup = tuple([(p.tid, p.oid) for p in hint_pod_ids])
         with self.db_conn.cursor() as cursor:
             query = """
-            WITH RECURSIVE dependency_chain AS (
-                SELECT pd.dep_pid_tid AS tid, pd.dep_pid_oid AS oid
-                FROM pod_dependencies pd
-                WHERE (pd.pod_id_tid, pd.pod_id_oid) IN %s
-                UNION ALL
-                SELECT pd.dep_pid_tid, pd.dep_pid_oid
-                FROM pod_dependencies pd
-                INNER JOIN dependency_chain dc ON pd.pod_id_tid = dc.tid AND pd.pod_id_oid = dc.oid
-            )
-            SELECT ps.tid, ps.oid, ps.pod_bytes, ps.chunk
-            FROM (
-                SELECT tid, oid FROM dependency_chain
-                UNION
-                SELECT tid, oid FROM pod_storage WHERE (tid, oid) IN %s
-            ) AS combined
-            INNER JOIN pod_storage ps ON combined.tid = ps.tid AND combined.oid = ps.oid
-            ORDER BY (ps.tid, ps.oid, ps.chunk);
+                WITH RECURSIVE dependency_chain AS (
+                    SELECT
+                        pd.dep_pid_tid AS tid,
+                        pd.dep_pid_oid AS oid,
+                        ARRAY[(pd.dep_pid_tid, pd.dep_pid_oid)]::RECORD[] AS visited
+                    FROM
+                        pod_dependencies pd
+                    WHERE
+                        (pd.pod_id_tid, pd.pod_id_oid) IN %s
+
+                    UNION ALL
+
+                    SELECT
+                        pd.dep_pid_tid,
+                        pd.dep_pid_oid,
+                        visited || (pd.dep_pid_tid, pd.dep_pid_oid)
+                    FROM
+                        pod_dependencies pd
+                    INNER JOIN
+                        dependency_chain dc
+                        ON pd.pod_id_tid = dc.tid AND pd.pod_id_oid = dc.oid
+                    WHERE
+                        NOT (pd.dep_pid_tid, pd.dep_pid_oid) = ANY(dc.visited)
+                )
+                SELECT
+                    ps.tid,
+                    ps.oid,
+                    ps.pod_bytes,
+                    ps.chunk
+                FROM (
+                    SELECT
+                        tid,
+                        oid
+                    FROM
+                        dependency_chain
+                    UNION
+                    SELECT
+                        tid,
+                        oid
+                    FROM
+                        pod_storage
+                    WHERE
+                        (tid, oid) IN %s
+                ) AS combined
+                INNER JOIN
+                    pod_storage ps
+                    ON combined.tid = ps.tid AND combined.oid = ps.oid
+                ORDER BY
+                    (ps.tid, ps.oid, ps.chunk);
+
             """
             cursor.execute(query, (hint_tid_oid_tup, hint_tid_oid_tup))
             results = cursor.fetchall()

@@ -116,7 +116,7 @@ class RandomMutatingListCells(NotebookCells):
                 "l = [\n"
                 f"  secrets.token_bytes({self.elem_size})\n"
                 f"  for idx in range({self.list_size})\n"
-                "]"
+                "]; l2 = [l]; l.append(l2)"  # <-- self-ref
             )
 
         # Mutate elements randomly.
