@@ -146,12 +146,17 @@ class StaticPodPickler(BasePickler):
         # Builtin types.
         str,
         bytes,
-        # list,
         # Numerical types.
         np.ndarray,
         pd.DataFrame,
         matplotlib.figure.Figure,
     )
+    SPLIT_MODULES = {
+        "sklearn",
+    }
+    FINAL_MODULES = {
+        "sklearn",
+    }
 
     def __init__(
         self,
@@ -172,9 +177,11 @@ class StaticPodPickler(BasePickler):
         if isinstance(obj, StaticPodPickler.BUNDLE_TYPES):
             # TODO: Check shared reference.
             return None
-        if not isinstance(obj, StaticPodPickler.SPLIT_TYPES):
-            # Split only allowed types.
-            # print(type(obj))
+        obj_module = getattr(obj, "__module__", None)
+        obj_module = obj_module.split(".")[0] if isinstance(obj_module, str) else None
+        if not (isinstance(obj, StaticPodPickler.SPLIT_TYPES) or obj_module in StaticPodPickler.SPLIT_MODULES):
+            # Split only allowed types and modules.
+            # print(type(obj), obj_module)
             return None
 
         oid = object_id(obj)
@@ -187,7 +194,7 @@ class StaticPodPickler(BasePickler):
             self.ctx.job_queue.put(
                 StaticPodPicklerJob(
                     obj=obj,
-                    is_final=isinstance(obj, StaticPodPickler.FINAL_TYPES),
+                    is_final=(isinstance(obj, StaticPodPickler.FINAL_TYPES) or obj_module in StaticPodPickler.FINAL_MODULES),
                 )
             )
         self.root_deps.add(pid)
