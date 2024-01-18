@@ -109,14 +109,15 @@ class RandomMutatingListCells(NotebookCells):
             return (
                 "import secrets\n"
                 "import random\n"
-                "def f():\n"
+                "def f():\n"  # Test pickling functions.
                 "  def g():\n"
                 "    return 0\n"
                 "  return 0\n"
                 "l = [\n"
                 f"  secrets.token_bytes({self.elem_size})\n"
                 f"  for idx in range({self.list_size})\n"
-                "]"
+                "]\n"
+                "l2 = [l]; l.append(l2)"  # Test self-referential objects.
             )
 
         # Mutate elements randomly.
