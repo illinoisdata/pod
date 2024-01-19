@@ -56,6 +56,8 @@ class BenchArgs:
     neo4j_port: int = 7687  # Port on the hostname where Neo4j server is running.
     neo4j_password: str = "pod_neo4j"  # Password to access the Neo4j server.
     neo4j_database: Optional[str] = None  # Database name to store pod data.
+    mongo_hostname: str = "localhost"  # Hostname where MongoDB server is running.
+    mongo_port: int = 27017  # Port on the hostname where MongoDB server is running.
 
 
 """ Notebook handler/executor """
@@ -213,7 +215,7 @@ class SUT:
                 )
             )
         elif args.sut == "pod_mongo":
-            return StaticPodPickling(MongoPodStorage("localhost", 27017))
+            return StaticPodPickling(MongoPodStorage(args.mongo_hostname, args.mongo_port))
         raise ValueError(f'Invalid SUT name "{args.sut}"')
 
 
