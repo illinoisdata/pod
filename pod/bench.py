@@ -50,6 +50,8 @@ class BenchArgs:
     pod_dir: Optional[Path] = None  # Path to pod storage root directory.
     psql_hostname: str = "localhost"  # Hostname where PostgreSQL server is running.
     psql_port: int = 5432  # Port on the hostname where PostgreSQL server is running.
+    redis_hostname: str = "localhost"  # Hostname where Redis server is running.
+    redis_port: int = 6379  # Port on the hostname where Redis server is running.
 
 
 """ Notebook handler/executor """
@@ -196,7 +198,7 @@ class SUT:
         elif args.sut == "pod_psql":
             return StaticPodPickling(PostgreSQLPodStorage(args.psql_hostname, args.psql_port))
         elif args.sut == "pod_redis":
-            return StaticPodPickling(RedisPodStorage("localhost", 6379))
+            return StaticPodPickling(RedisPodStorage(args.redis_hostname, args.redis_port))
         elif args.sut == "pod_neo4j":
             return StaticPodPickling(Neo4jPodStorage("neo4j://localhost", 7687))
         elif args.sut == "pod_mongo":

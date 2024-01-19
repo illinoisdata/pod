@@ -47,6 +47,7 @@ SUTS=(
     "imm"
     "pfl"
     "ppg"
+    "prd"
 )
 
 function get_sut_args() {
@@ -63,7 +64,10 @@ function get_sut_args() {
         sut_args="--sut pod_file --pod_dir ${POD_DIR}"
     elif [[ $_SUT == "ppg" ]]
     then
-        sut_args="--sut pod_psql --psql_hostname podpsql --psql_port 5433"
+        sut_args="--sut pod_psql --psql_hostname podpsql --psql_port 5432"
+    elif [[ $_SUT == "prd" ]]
+    then
+        sut_args="--sut pod_redis --redis_hostname podredis --redis_port 6379"
     else
         echo "ERROR: Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
@@ -86,9 +90,14 @@ function prepare_sut() {
     elif [[ $_SUT == "ppg" ]]
     then
         export PGPASSWORD=postgres
-        psql --host=podpsql --port=5433 \
+        echo "psql \"DROP DATABASE IF EXISTS pod;\""
+        psql --host=podpsql --port=5432 \
             -U postgres -d postgres \
             -c "DROP DATABASE IF EXISTS pod;"
+    elif [[ $_SUT == "prd" ]]
+    then
+        echo "redis-cli flushall"
+        redis-cli -h podredis -p 6379 flushall
     else
         echo "ERROR: Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1

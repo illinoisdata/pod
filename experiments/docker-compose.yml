@@ -9,15 +9,26 @@ services:
       - ${PWD}:/pod
     working_dir: /pod
     command: ["/bin/bash"]
+
   podpsql:
-    image: postgres
+    image: postgres:16.1-bookworm
     hostname: podpsql
     tty: true
     stdin_open: true
-    volumes:
-      - ${PWD}:/pod
+    working_dir: /
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    working_dir: /pod
-    command: ["postgres", "-p", "5433"]
+    command: ["postgres", "-p", "5432"]
+
+  podredis:
+    image: redis:7.2.4-bookworm
+    hostname: podredis
+    tty: true
+    stdin_open: true
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--port", "6379"]
+
+volumes:
+  redis_data:
