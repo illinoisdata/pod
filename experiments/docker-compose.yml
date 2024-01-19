@@ -15,7 +15,6 @@ services:
     hostname: podpsql
     tty: true
     stdin_open: true
-    working_dir: /
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -42,6 +41,12 @@ services:
       NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"  # Using Neo4j Developer License (https://neo4j.com/licensing/)
       NEO4J_AUTH: neo4j/podneo4jPassword
     command: ["neo4j"]
+
+  podmongo:
+    image: mongo:7.0.5-jammy
+    hostname: podmongo
+    tty: true
+    stdin_open: true
 
 volumes:
   redis_data:

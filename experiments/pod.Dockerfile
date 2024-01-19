@@ -26,6 +26,11 @@ RUN apt-get install redis-tools --yes
 RUN apt --fix-broken install && apt install openjdk-17-jre --yes
 RUN apt install wget --yes
 RUN wget https://dist.neo4j.org/cypher-shell/cypher-shell_5.15.0_all.deb?_ga=2.72547732.605979457.1705684934-272562543.1705684934 -O cypher-shell.deb && dpkg -i cypher-shell.deb && rm cypher-shell.deb
+RUN apt-get install gnupg --yes
+RUN wget -qO- https://www.mongodb.org/static/pgp/server-7.0.asc | tee /etc/apt/trusted.gpg.d/server-7.0.asc && \
+    echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+RUN apt-get update
+RUN apt-get install mongodb-mongosh --yes
 
 WORKDIR /
 ENTRYPOINT /bin/bash

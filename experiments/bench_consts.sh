@@ -49,6 +49,7 @@ SUTS=(
     "ppg"
     "prd"
     "pnj"
+    "pmg"
 )
 
 function get_sut_args() {
@@ -72,6 +73,9 @@ function get_sut_args() {
     elif [[ $_SUT == "pnj" ]]
     then
         sut_args="--sut pod_neo4j --neo4j_uri neo4j+ssc://podneo4j --neo4j_port 7687 --neo4j_password podneo4jPassword --neo4j_database pod"
+    elif [[ $_SUT == "pmg" ]]
+    then
+        sut_args="--sut pod_mongo --mongo_hostname podmongo --mongo_port 27017"
     else
         echo "ERROR: Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
@@ -109,6 +113,10 @@ function prepare_sut() {
             -u neo4j -p podneo4jPassword \
             -d system \
             "CREATE OR REPLACE DATABASE pod;"
+    elif [[ $_SUT == "pmg" ]]
+    then
+        echo "mongo \"db.dropDatabase();\""
+        mongosh pod --host podmongo --port 27017 --eval "db.dropDatabase();"
     else
         echo "ERROR: Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
