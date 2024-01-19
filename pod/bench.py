@@ -52,6 +52,10 @@ class BenchArgs:
     psql_port: int = 5432  # Port on the hostname where PostgreSQL server is running.
     redis_hostname: str = "localhost"  # Hostname where Redis server is running.
     redis_port: int = 6379  # Port on the hostname where Redis server is running.
+    neo4j_uri: str = "neo4j://localhost"  # URI where Neo4j server is running.
+    neo4j_port: int = 7687  # Port on the hostname where Neo4j server is running.
+    neo4j_password: str = "pod_neo4j"  # Password to access the Neo4j server.
+    neo4j_database: Optional[str] = None  # Database name to store pod data.
 
 
 """ Notebook handler/executor """
@@ -200,7 +204,14 @@ class SUT:
         elif args.sut == "pod_redis":
             return StaticPodPickling(RedisPodStorage(args.redis_hostname, args.redis_port))
         elif args.sut == "pod_neo4j":
-            return StaticPodPickling(Neo4jPodStorage("neo4j://localhost", 7687))
+            return StaticPodPickling(
+                Neo4jPodStorage(
+                    args.neo4j_uri,
+                    args.neo4j_port,
+                    args.neo4j_password,
+                    database=args.neo4j_database,
+                )
+            )
         elif args.sut == "pod_mongo":
             return StaticPodPickling(MongoPodStorage("localhost", 27017))
         raise ValueError(f'Invalid SUT name "{args.sut}"')

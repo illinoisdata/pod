@@ -23,6 +23,9 @@ RUN python -m pip install -e /pod/
 
 # WIP: Move this up
 RUN apt-get install redis-tools --yes
+RUN apt --fix-broken install && apt install openjdk-17-jre --yes
+RUN apt install wget --yes
+RUN wget https://dist.neo4j.org/cypher-shell/cypher-shell_5.15.0_all.deb?_ga=2.72547732.605979457.1705684934-272562543.1705684934 -O cypher-shell.deb && dpkg -i cypher-shell.deb && rm cypher-shell.deb
 
 WORKDIR /
 ENTRYPOINT /bin/bash

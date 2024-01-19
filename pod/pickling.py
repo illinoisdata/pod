@@ -383,7 +383,7 @@ if __name__ == "__main__":
     elif storage_mode == "redis":
         pod_storage = RedisPodStorage("localhost", 6379)
     elif storage_mode == "neo4j":
-        pod_storage = Neo4jPodStorage("neo4j://localhost", 7687)
+        pod_storage = Neo4jPodStorage("neo4j://localhost", 7687, "pod_neo4j")
     elif storage_mode == "mongo":
         pod_storage = MongoPodStorage("localhost", 27017)
     else:

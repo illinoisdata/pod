@@ -30,5 +30,19 @@ services:
       - redis_data:/data
     command: ["redis-server", "--port", "6379"]
 
+  podneo4j:
+    # image: neo4j:5.15.0-community-bullseye
+    image: neo4j:5.15.0-enterprise-bullseye
+    hostname: podneo4j
+    tty: true
+    stdin_open: true
+    volumes:
+      - neo4j_data:/data
+    environment:
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"  # Using Neo4j Developer License (https://neo4j.com/licensing/)
+      NEO4J_AUTH: neo4j/podneo4jPassword
+    command: ["neo4j"]
+
 volumes:
   redis_data:
+  neo4j_data:
