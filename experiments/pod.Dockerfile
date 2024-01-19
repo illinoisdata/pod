@@ -21,5 +21,8 @@ COPY ./setup.py /pod/setup.py
 COPY ./README.md /pod/README.md
 RUN python -m pip install -e /pod/
 
+# WIP: Move this up
+RUN apt-get install redis-tools --yes
+
 WORKDIR /
 ENTRYPOINT /bin/bash
