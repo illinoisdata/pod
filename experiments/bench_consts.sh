@@ -48,6 +48,7 @@ SUTS=(
     "pfl"
     "ppg"
     "prd"
+    "pnj"
 )
 
 function get_sut_args() {
@@ -68,6 +69,9 @@ function get_sut_args() {
     elif [[ $_SUT == "prd" ]]
     then
         sut_args="--sut pod_redis --redis_hostname podredis --redis_port 6379"
+    elif [[ $_SUT == "pnj" ]]
+    then
+        sut_args="--sut pod_neo4j --neo4j_uri neo4j+ssc://podneo4j --neo4j_port 7687 --neo4j_password podneo4jPassword --neo4j_database pod"
     else
         echo "ERROR: Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
@@ -98,6 +102,13 @@ function prepare_sut() {
     then
         echo "redis-cli flushall"
         redis-cli -h podredis -p 6379 flushall
+    elif [[ $_SUT == "pnj" ]]
+    then
+        echo "cypher-shell \"CREATE OR REPLACE DATABASE pod;\""
+        cypher-shell -a neo4j://podneo4j:7687 \
+            -u neo4j -p podneo4jPassword \
+            -d system \
+            "CREATE OR REPLACE DATABASE pod;"
     else
         echo "ERROR: Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
