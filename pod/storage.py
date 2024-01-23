@@ -283,7 +283,7 @@ class FilePodStorageReader(PodReader):
         return io.BytesIO(page[resolved_pid])
 
     # def __del__(self) -> None:  # stat_cache_pfl
-    # self.cache_stat.summary()  # stat_cache_pfl
+    #     self.cache_stat.summary()  # stat_cache_pfl
 
 
 class FilePodStorage(PodStorage):
