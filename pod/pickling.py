@@ -7,7 +7,6 @@ from __future__ import annotations
 import io
 import os
 from dataclasses import dataclass
-from queue import Queue
 from types import CodeType, FunctionType, ModuleType, NoneType
 from typing import Any, Dict, Optional, Set
 
@@ -19,7 +18,7 @@ from dill import Pickler as BasePickler
 from dill import Unpickler as BaseUnpickler
 
 from pod.common import Object, ObjectId, PodId, TimeId, make_pod_id, object_id, step_time_id
-from pod.storage import PodReader, PodStorage
+from pod.storage import PodReader, PodStorage, PodWriter
 
 
 # Inherit this class to cache loaded objects (e.g., for shared references).
@@ -101,17 +100,52 @@ class StaticPodPicklerJob:
 @dataclass
 class StaticPodPicklerContext:
     seen_oid: Set[ObjectId]
-    job_queue: Queue[StaticPodPicklerJob]
+    dependency_maps: Dict[PodId, Set[PodId]]
 
     @staticmethod
     def new(obj: Object) -> StaticPodPicklerContext:
-        job_queue: Queue[StaticPodPicklerJob] = Queue()
-        job_queue.put(StaticPodPicklerJob(obj, is_final=False))
         seen_oid = {object_id(obj)}
         return StaticPodPicklerContext(
             seen_oid=seen_oid,
-            job_queue=job_queue,
+            dependency_maps={},
         )
+
+
+class StaticPodPicklingMetadata:
+    ROOT_MEMO_ID_BYTES = 8
+
+    def __init__(self, root_memo_id: int) -> None:
+        self.root_memo_id = root_memo_id  # For self-referential objects.
+
+    @staticmethod
+    def new(
+        pickler: BasePickler,
+        job: StaticPodPicklerJob,
+    ) -> StaticPodPicklingMetadata:
+        return StaticPodPicklingMetadata(
+            root_memo_id=pickler.memo[id(job.obj)][0],
+        )
+
+    def write(self, buffer: io.IOBase) -> None:
+        buffer.write(self.root_memo_id.to_bytes(StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES, byteorder="big"))
+
+    @staticmethod
+    def read_from(buffer: io.IOBase) -> StaticPodPicklingMetadata:
+        # Keep in sync with write.
+        orig_pos = buffer.tell()
+        buffer.seek(-StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES, os.SEEK_END)
+        root_memo_id = int.from_bytes(buffer.read(StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES), byteorder="big")
+        buffer.seek(orig_pos, os.SEEK_SET)
+        return StaticPodPicklingMetadata(
+            root_memo_id=root_memo_id,
+        )
+
+    def __reduce__(self):
+        return self.__class__, (self.obj_bytes, self.root_memo_id)
+
+
+# from pod.stats import PodPicklingStat  # stat_staticppick
+# pod_pickling_stat = PodPicklingStat()  # stat_staticppick
 
 
 class StaticPodPickler(BasePickler):
@@ -163,15 +197,17 @@ class StaticPodPickler(BasePickler):
         root_obj: Object,
         root_pid: PodId,
         ctx: StaticPodPicklerContext,
+        writer: PodWriter,
         file: io.IOBase,
-        *args,
-        **kwargs,
+        pickle_kwargs: Dict[str, Any] = {},
     ) -> None:
-        BasePickler.__init__(self, file, *args, **kwargs)
+        BasePickler.__init__(self, file, **pickle_kwargs)
         self.root_obj = root_obj
         self.root_pid = root_pid
         self.root_deps: Set[PodId] = set()
         self.ctx = ctx
+        self.writer = writer
+        self.pickle_kwargs = pickle_kwargs
 
     def persistent_id(self, obj: Object) -> Optional[ObjectId]:
         if isinstance(obj, StaticPodPickler.BUNDLE_TYPES):
@@ -191,50 +227,42 @@ class StaticPodPickler(BasePickler):
             return None
         if oid not in self.ctx.seen_oid:
             self.ctx.seen_oid.add(oid)
-            self.ctx.job_queue.put(
-                StaticPodPicklerJob(
-                    obj=obj,
-                    is_final=(isinstance(obj, StaticPodPickler.FINAL_TYPES) or obj_module in StaticPodPickler.FINAL_MODULES),
-                )
-            )
+            StaticPodPickler.dump_and_pod_write(obj, pid, self.ctx, self.writer, self.pickle_kwargs)
         self.root_deps.add(pid)
         return oid
 
     def get_root_deps(self) -> Set[PodId]:
         return self.root_deps
 
-
-class StaticPodPicklingMetadata:
-    ROOT_MEMO_ID_BYTES = 8
-
-    def __init__(self, root_memo_id: int) -> None:
-        self.root_memo_id = root_memo_id  # For self-referential objects.
-
     @staticmethod
-    def new(
-        pickler: BasePickler,
-        job: StaticPodPicklerJob,
-    ) -> StaticPodPicklingMetadata:
-        return StaticPodPicklingMetadata(
-            root_memo_id=pickler.memo[id(job.obj)][0],
+    def dump_and_pod_write(
+        this_obj: Object,
+        this_pid: PodId,
+        ctx: StaticPodPicklerContext,
+        writer: PodWriter,
+        pickle_kwargs: Dict[str, Any] = {},
+    ) -> None:
+        # Determine if this object is a final type (prefer base pickler).
+        this_obj_module_str = getattr(this_obj, "__module__", None)
+        this_obj_module = this_obj_module_str.split(".")[0] if isinstance(this_obj_module_str, str) else None
+        is_final = isinstance(this_obj, StaticPodPickler.FINAL_TYPES) or this_obj_module in StaticPodPickler.FINAL_MODULES
+
+        # Pickle this object into a new buffer.
+        this_buffer = io.BytesIO()
+        this_pickler = (
+            BasePickler(this_buffer, **pickle_kwargs)
+            if is_final
+            else StaticPodPickler(this_obj, this_pid, ctx, writer, this_buffer, pickle_kwargs)
         )
+        this_pickler.dump(this_obj)
+        StaticPodPicklingMetadata(root_memo_id=this_pickler.memo[id(this_obj)][0]).write(this_buffer)
+        this_pod_bytes = this_buffer.getvalue()
 
-    def write(self, buffer: io.IOBase) -> None:
-        buffer.write(self.root_memo_id.to_bytes(StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES, byteorder="big"))
+        # Write to pod storage.
+        writer.write_pod(this_pid, this_pod_bytes)
+        ctx.dependency_maps[this_pid] = {} if is_final else this_pickler.get_root_deps()
 
-    @staticmethod
-    def read_from(buffer: io.IOBase) -> StaticPodPicklingMetadata:
-        # Keep in sync with write.
-        orig_pos = buffer.tell()
-        buffer.seek(-StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES, os.SEEK_END)
-        root_memo_id = int.from_bytes(buffer.read(StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES), byteorder="big")
-        buffer.seek(orig_pos, os.SEEK_SET)
-        return StaticPodPicklingMetadata(
-            root_memo_id=root_memo_id,
-        )
-
-    def __reduce__(self):
-        return self.__class__, (self.obj_bytes, self.root_memo_id)
+        # pod_pickling_stat.append(this_pid, this_obj, this_pod_bytes)  # stat_staticppick
 
 
 @dataclass
@@ -304,36 +332,13 @@ class StaticPodPickling(PodPickling):
         tid = step_time_id()
         pid = make_pod_id(tid, object_id(obj))
         ctx = StaticPodPicklerContext.new(obj)
-        dependency_maps: Dict[PodId, Set[PodId]] = {}
 
-        # from pod.stats import PodPicklingStat  # stat_staticppick
-        # stat = PodPicklingStat()  # stat_staticppick
         with self.storage.writer() as writer:
-            while not ctx.job_queue.empty():
-                this_job = ctx.job_queue.get()
-                this_pid = make_pod_id(tid, object_id(this_job.obj))
-                this_buffer = io.BytesIO()
-                this_pickler = (
-                    BasePickler(this_buffer, **self.pickle_kwargs)
-                    if this_job.is_final
-                    else StaticPodPickler(
-                        this_job.obj,
-                        this_pid,
-                        ctx,
-                        this_buffer,
-                        **self.pickle_kwargs,
-                    )
-                )
-                this_pickler.dump(this_job.obj)
-                StaticPodPicklingMetadata(root_memo_id=this_pickler.memo[id(this_job.obj)][0]).write(this_buffer)
-                this_pod_bytes = this_buffer.getvalue()
-                writer.write_pod(this_pid, this_pod_bytes)
-                dependency_maps[this_pid] = {} if this_job.is_final else this_pickler.get_root_deps()
-                # stat.append(this_pid, this_job.obj, this_pod_bytes)  # stat_staticppick
-            for pod_id, deps in dependency_maps.items():
+            StaticPodPickler.dump_and_pod_write(obj, pid, ctx, writer, self.pickle_kwargs)
+            for pod_id, deps in ctx.dependency_maps.items():
                 writer.write_dep(pod_id, deps)
-                # stat.fill_dep(pod_id, dependency_maps)  # stat_staticppick
-            # stat.summary()  # stat_staticppick
+                # pod_pickling_stat.fill_dep(pod_id, ctx.dependency_maps)  # stat_staticppick
+            # pod_pickling_stat.summary()  # stat_staticppick
 
         return pid
 
