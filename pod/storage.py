@@ -579,6 +579,68 @@ class PostgreSQLPodStorage(PodStorage):
                     dep_pid_oid BIGINT,
                     PRIMARY KEY (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid)
                 );
+            CREATE OR REPLACE FUNCTION get_dependencies(hint_pod_ids BIGINT[][])
+            RETURNS TABLE(tid BIGINT, oid BIGINT, chunk BYTEA, level INTEGER)
+            LANGUAGE plpgsql
+            AS $$
+            DECLARE
+                node_tid BIGINT;
+                node_oid BIGINT;
+                current_level INTEGER := 0;
+                dep_record RECORD;
+            BEGIN
+                -- Temporary table to store visited nodes and their levels
+                CREATE TEMP TABLE IF NOT EXISTS temp_visited_nodes (
+                    tid BIGINT,
+                    oid BIGINT,
+                    level INTEGER,
+                    PRIMARY KEY (tid, oid)
+                );
+                TRUNCATE TABLE temp_visited_nodes;
+
+                -- Initialize visited nodes with hint_pod_ids at level 0
+                FOR i IN 1..array_upper(hint_pod_ids, 1) LOOP
+                    node_tid := hint_pod_ids[i][1];
+                    node_oid := hint_pod_ids[i][2];
+                    INSERT INTO temp_visited_nodes (tid, oid, level) VALUES (node_tid, node_oid, 0);
+                END LOOP;
+
+                -- Recursive traversal
+                LOOP
+                    -- Exit when no more nodes to process at the current level
+                    EXIT WHEN NOT EXISTS (SELECT 1 FROM temp_visited_nodes tvn WHERE tvn.level = current_level);
+
+                    -- Process nodes at the current level
+                    FOR dep_record IN SELECT tvn.tid, tvn.oid FROM temp_visited_nodes tvn WHERE tvn.level = current_level LOOP
+                        -- Find dependencies of the current node
+                        FOR dep_record IN SELECT pd.dep_pid_tid, pd.dep_pid_oid
+                                        FROM pod_dependencies pd
+                                        WHERE pd.pod_id_tid = dep_record.tid AND pd.pod_id_oid = dep_record.oid LOOP
+                            -- Insert the dependency with the next level, if not already in visited_nodes
+                            INSERT INTO temp_visited_nodes (tid, oid, level)
+                            VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid, current_level + 1)
+                            ON CONFLICT ON CONSTRAINT temp_visited_nodes_pkey DO NOTHING;
+                        END LOOP;
+                    END LOOP;
+
+                    -- Move to the next level
+                    current_level := current_level + 1;
+                END LOOP;
+
+                -- Return the result
+                RETURN QUERY SELECT * 
+                FROM pod_storage ps WHERE
+                (ps.tid, ps.oid) IN (
+                    SELECT tvn.tid, tvn.oid
+                    FROM temp_visited_nodes tvn
+                );
+
+                -- Optionally, you can clean up the temporary table here
+                DROP TABLE temp_visited_nodes;
+            END;
+            $$;
+
+
             """
             )
             self.db_conn.commit()
@@ -606,61 +668,9 @@ class PostgreSQLPodStorage(PodStorage):
         return PostgreSQLPodStorageWriter(self)
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
-        hint_tid_oid_tup = tuple([(p.tid, p.oid) for p in hint_pod_ids])
+        hint_tid_oid_array = [[p.tid, p.oid] for p in hint_pod_ids]
         with self.db_conn.cursor() as cursor:
-            query = """
-                WITH RECURSIVE dependency_chain AS (
-                    SELECT
-                        pd.dep_pid_tid AS tid,
-                        pd.dep_pid_oid AS oid,
-                        ARRAY[(pd.dep_pid_tid, pd.dep_pid_oid)]::RECORD[] AS visited
-                    FROM
-                        pod_dependencies pd
-                    WHERE
-                        (pd.pod_id_tid, pd.pod_id_oid) IN %s
-
-                    UNION ALL
-
-                    SELECT
-                        pd.dep_pid_tid,
-                        pd.dep_pid_oid,
-                        visited || (pd.dep_pid_tid, pd.dep_pid_oid)
-                    FROM
-                        pod_dependencies pd
-                    INNER JOIN
-                        dependency_chain dc
-                        ON pd.pod_id_tid = dc.tid AND pd.pod_id_oid = dc.oid
-                    WHERE
-                        NOT (pd.dep_pid_tid, pd.dep_pid_oid) = ANY(dc.visited)
-                )
-                SELECT
-                    ps.tid,
-                    ps.oid,
-                    ps.pod_bytes,
-                    ps.chunk
-                FROM (
-                    SELECT
-                        tid,
-                        oid
-                    FROM
-                        dependency_chain
-                    UNION
-                    SELECT
-                        tid,
-                        oid
-                    FROM
-                        pod_storage
-                    WHERE
-                        (tid, oid) IN %s
-                ) AS combined
-                INNER JOIN
-                    pod_storage ps
-                    ON combined.tid = ps.tid AND combined.oid = ps.oid
-                ORDER BY
-                    (ps.tid, ps.oid, ps.chunk);
-
-            """
-            cursor.execute(query, (hint_tid_oid_tup, hint_tid_oid_tup))
+            cursor.execute("SELECT * FROM get_dependencies(%s::BIGINT[][])", (hint_tid_oid_array,))
             results = cursor.fetchall()
             for row in results:
                 tid, oid, pod_bytes, chunk = row
