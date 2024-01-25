@@ -21,7 +21,7 @@ from loguru import logger
 from neo4j import GraphDatabase
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
-from pod.common import PodId
+from pod.common import PodId, make_pod_id
 
 
 def serialize_pod_id(pod_id: PodId) -> bytes:
@@ -77,6 +77,41 @@ class PodStorage:
         raise NotImplementedError("Abstract method")
 
 
+@dataclass
+class PodStoragePodBytesMemo:
+    max_size: int
+    size: int
+    memo_page: Dict[bytes, PodId]
+
+    @staticmethod
+    def new(max_size: int) -> PodStoragePodBytesMemo:
+        return PodStoragePodBytesMemo(
+            max_size=max_size,
+            size=0,
+            memo_page={},
+        )
+
+    def __contains__(self, pod_bytes: bytes) -> bool:
+        return pod_bytes in self.memo_page
+
+    def get(self, pod_bytes: bytes) -> PodId:
+        return self.memo_page[pod_bytes]
+
+    def put(self, pod_bytes: bytes, pod_id: PodId):
+        if len(pod_bytes) > self.max_size or pod_bytes in self:
+            return
+        self.memo_page[pod_bytes] = pod_id
+        self.size += len(pod_bytes)
+        while self.size > self.max_size:
+            popped_pod_bytes, _ = self.memo_page.popitem()
+            self.size -= len(popped_pod_bytes)
+
+    def __reduce__(self):
+        return self.__class__, (self.max_size, self.size, self.memo_page)
+
+
+PodStoragePodIdSynonym = Dict[PodId, PodId]
+
 """ Dictionary-based storage (ephemeral, for experimental uses) """
 
 
@@ -131,7 +166,6 @@ class DictPodStorage(PodStorage):
 
 
 FilePodStorageIndex = Dict[PodId, int]
-FilePodStoragePodIdSynonym = Dict[PodId, PodId]
 FilePodStoragePodIdDep = Dict[PodId, Set[PodId]]
 FilePodStoragePodPage = Dict[PodId, bytes]
 FilePodStorageDepPage = FilePodStoragePodIdDep
@@ -144,39 +178,6 @@ class FilePodStorageStats:
     dep_page_count: int
     pid_index_page_count: int
     pid_synonym_page_count: int
-
-
-@dataclass
-class FilePodStoragePodBytesMemo:
-    max_size: int
-    size: int
-    memo_page: Dict[bytes, PodId]
-
-    @staticmethod
-    def new(max_size: int) -> FilePodStoragePodBytesMemo:
-        return FilePodStoragePodBytesMemo(
-            max_size=max_size,
-            size=0,
-            memo_page={},
-        )
-
-    def __contains__(self, pod_bytes: bytes) -> bool:
-        return pod_bytes in self.memo_page
-
-    def get(self, pod_bytes: bytes) -> PodId:
-        return self.memo_page[pod_bytes]
-
-    def put(self, pod_bytes: bytes, pod_id: PodId):
-        if len(pod_bytes) > self.max_size or pod_bytes in self:
-            return
-        self.memo_page[pod_bytes] = pod_id
-        self.size += len(pod_bytes)
-        while self.size > self.max_size:
-            popped_pod_bytes, _ = self.memo_page.popitem()
-            self.size -= len(popped_pod_bytes)
-
-    def __reduce__(self):
-        return self.__class__, (self.max_size, self.size, self.memo_page)
 
 
 class FilePodStorageWriter(PodWriter):
@@ -298,8 +299,8 @@ class FilePodStorage(PodStorage):
             pid_synonym_page_count=0,
         )
         self.pid_index: FilePodStorageIndex = {}
-        self.pid_synonym: FilePodStoragePodIdSynonym = {}
-        self.pod_bytes_memo: FilePodStoragePodBytesMemo = FilePodStoragePodBytesMemo.new(2_000_000_000)
+        self.pid_synonym: PodStoragePodIdSynonym = {}
+        self.pod_bytes_memo: PodStoragePodBytesMemo = PodStoragePodBytesMemo.new(2_000_000_000)
         self.pid_deps: FilePodStoragePodIdDep = {}
         if self.is_init():
             self.stats = self.reload_stats()
@@ -398,20 +399,20 @@ class FilePodStorage(PodStorage):
                 pid_index.update(pickle.load(f))
         return pid_index
 
-    def update_pid_synonym(self, new_pid_synonyms: FilePodStoragePodIdSynonym) -> None:
+    def update_pid_synonym(self, new_pid_synonyms: PodStoragePodIdSynonym) -> None:
         self.pid_synonym.update(new_pid_synonyms)
         self.write_pid_synonym(new_pid_synonyms)
 
     def resolve_pid_synonym(self, pid: PodId) -> PodId:
         return self.pid_synonym.get(pid, pid)
 
-    def write_pid_synonym(self, pid_synonym: FilePodStoragePodIdSynonym) -> None:
+    def write_pid_synonym(self, pid_synonym: PodStoragePodIdSynonym) -> None:
         page_idx = self.next_pid_synonym_page_idx()
         with open(self.pid_synonym_path(page_idx), "wb") as f:
             pickle.dump(pid_synonym, f)
 
-    def reload_pid_synonym(self) -> FilePodStoragePodIdSynonym:
-        pid_synonym: FilePodStoragePodIdSynonym = {}
+    def reload_pid_synonym(self) -> PodStoragePodIdSynonym:
+        pid_synonym: PodStoragePodIdSynonym = {}
         for page_idx in range(self.stats.pid_synonym_page_count):
             with open(self.pid_synonym_path(page_idx), "rb") as f:
                 pid_synonym.update(pickle.load(f))
@@ -441,14 +442,15 @@ class FilePodStorage(PodStorage):
 
 
 class PostgreSQLPodStorageWriter(PodWriter):
-    CHUNK_SIZE = 9_000_000_00  # 90 MB
-    FLUSH_SIZE = 2_000_000_000  # 5 GB
+    CHUNK_SIZE = 100_000_000  # 90 MB
+    FLUSH_SIZE = 500_000_000  # 5 GB
 
     def __init__(self, storage: PostgreSQLPodStorage) -> None:
         self.storage = storage
         self.storage_buffer: List[Tuple] = []
         self.dependency_buffer: List[Tuple] = []
         self.buf_size = 0
+        self.new_pid_synonyms: List[Tuple] = []
 
     def __enter__(self):
         return self
@@ -457,6 +459,8 @@ class PostgreSQLPodStorageWriter(PodWriter):
         if exc_type is not None:
             self.storage.db_conn.rollback()
         else:
+            self.update_synonyms()
+            self.flush_synonyms()
             self.flush_storage()
             self.flush_dependencies()
             self.storage.db_conn.commit()
@@ -474,13 +478,22 @@ class PostgreSQLPodStorageWriter(PodWriter):
         self.storage_buffer = []
         self.buf_size = 0
 
-
     def flush_dependencies(self):
         if len(self.dependency_buffer) == 0:
             return
+        new_dep_buffer = []
+        for dep in self.dependency_buffer:
+            pid = make_pod_id(dep[0], dep[1])
+            dep_pid = make_pod_id(dep[2], dep[3])
+            if pid in self.storage.synonyms:
+                pid = self.storage.synonyms[pid]
+            if dep_pid in self.storage.synonyms:
+                dep_pid = self.storage.synonyms[dep_pid]
+            new_dep_buffer.append((pid.tid, pid.oid, dep_pid.tid, dep_pid.oid))
+
         with self.storage.db_conn.cursor() as cursor:
             # Constructing insert query
-            insert_values = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x).decode() for x in self.dependency_buffer)
+            insert_values = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x).decode() for x in new_dep_buffer)
             if insert_values:
                 insert_query = f"""
                     INSERT INTO pod_dependencies (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid)
@@ -490,28 +503,51 @@ class PostgreSQLPodStorageWriter(PodWriter):
                 cursor.execute(insert_query)
         self.dependency_buffer = []
 
+    def update_synonyms(self):
+        self.storage.synonyms.update({make_pod_id(r[0], r[1]): make_pod_id(r[2], r[3]) for r in self.new_pid_synonyms})
+
+    def flush_synonyms(self):
+        if len(self.new_pid_synonyms) == 0:
+            return
+        with self.storage.db_conn.cursor() as cursor:
+            insert_values = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x).decode() for x in self.new_pid_synonyms)
+            if insert_values:
+                insert_query = f"""
+                    INSERT INTO pod_synonyms (pod_tid, pod_oid, syn_tid, syn_oid)
+                    VALUES {insert_values};
+                """
+                cursor.execute(insert_query)
+        self.new_pid_synonyms = []
+
     def write_pod(
         self,
         pod_id: PodId,
         pod_bytes: bytes,
     ) -> None:
-        for i in range(0, len(pod_bytes), PostgreSQLPodStorageWriter.CHUNK_SIZE):
-            if i == 0:
-                self.buf_size += min(len(pod_bytes), PostgreSQLPodStorageWriter.CHUNK_SIZE)
-            else:
-                self.buf_size += min(PostgreSQLPodStorageWriter.CHUNK_SIZE, len(pod_bytes) - i)
-            self.storage_buffer.append(
-                (
-                    pod_id.tid,
-                    pod_id.oid,
-                    int(i / PostgreSQLPodStorageWriter.CHUNK_SIZE),
-                    pod_bytes[i: i + PostgreSQLPodStorageWriter.CHUNK_SIZE],
+        if pod_bytes in self.storage.pod_bytes_memo:
+            # Save as synonymous pids.
+            same_pod_id = self.storage.pod_bytes_memo.get(pod_bytes)
+            self.new_pid_synonyms.append((pod_id.tid, pod_id.oid, same_pod_id.tid, same_pod_id.oid))
+        else:
+            # New pod bytes.
+            self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
+            for i in range(0, len(pod_bytes), PostgreSQLPodStorageWriter.CHUNK_SIZE):
+                if i == 0:
+                    self.buf_size += min(len(pod_bytes), PostgreSQLPodStorageWriter.CHUNK_SIZE)
+                else:
+                    self.buf_size += min(PostgreSQLPodStorageWriter.CHUNK_SIZE, len(pod_bytes) - i)
+                self.storage_buffer.append(
+                    (
+                        pod_id.tid,
+                        pod_id.oid,
+                        int(i / PostgreSQLPodStorageWriter.CHUNK_SIZE),
+                        pod_bytes[i: i + PostgreSQLPodStorageWriter.CHUNK_SIZE],
+                    )
                 )
-            )
-
-            if self.buf_size > PostgreSQLPodStorageWriter.FLUSH_SIZE:
-                self.flush_storage()
-                self.flush_dependencies()
+                if self.buf_size > PostgreSQLPodStorageWriter.FLUSH_SIZE:
+                    self.update_synonyms()
+                    self.flush_storage()
+                    self.flush_dependencies()
 
     def write_dep(
         self,
@@ -526,6 +562,8 @@ class PostgreSQLPodStorageReader(PodReader):
         self.storage = storage
 
     def read(self, pod_id: PodId) -> io.IOBase:
+        if pod_id in self.storage.synonyms:
+            pod_id = self.storage.synonyms[pod_id]
         if (pod_id.tid, pod_id.oid) not in self.storage.cache:
             # logger.warning(f"Cache miss {pod_id}")
             with self.storage.db_conn.cursor() as cursor:
@@ -534,8 +572,8 @@ class PostgreSQLPodStorageReader(PodReader):
                     (pod_id.tid, pod_id.oid),
                 )
                 result = cursor.fetchall()
-                if result is None:
-                    raise ValueError("No data found for the given pod_id")
+                if len(result) == 0:
+                    raise ValueError(f"No data found for the given pod_id {pod_id}")
                 pod_bytes = b""
                 for item in result:
                     pod_bytes += item[0]
@@ -568,6 +606,13 @@ class PostgreSQLPodStorage(PodStorage):
                     chunk INTEGER,
                     PRIMARY KEY (tid, oid, chunk)
                 );
+                CREATE TABLE IF NOT EXISTS pod_synonyms (
+                    pod_tid BIGINT,
+                    pod_oid BIGINT,
+                    syn_tid BIGINT,
+                    syn_oid BIGINT,
+                    PRIMARY KEY (pod_tid, pod_oid, syn_tid, syn_oid)
+                );
                 CREATE TABLE IF NOT EXISTS pod_dependencies (
                     pod_id_tid BIGINT,
                     pod_id_oid BIGINT,
@@ -575,112 +620,117 @@ class PostgreSQLPodStorage(PodStorage):
                     dep_pid_oid BIGINT,
                     PRIMARY KEY (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid)
                 );
-CREATE OR REPLACE FUNCTION get_dependencies(hint_pod_ids BIGINT[][])
-              RETURNS TABLE(tid BIGINT, oid BIGINT, chunk BYTEA, level INTEGER)
-              LANGUAGE plpgsql
-              AS $$
-              DECLARE
-                  node_tid BIGINT;
-                  node_oid BIGINT;
-                  iteration BOOLEAN := FALSE;
-                  dep_record RECORD;
-                  curr_record RECORD;
-              BEGIN
-                  -- Temporary table to store visited nodes and their levels
-                  CREATE TEMP TABLE IF NOT EXISTS current_level_it_0 (
-                    tid BIGINT,
-                    oid BIGINT,
-                    PRIMARY KEY (tid, oid)
-                  );
-                  TRUNCATE TABLE current_level_it_0;
-                  
-                  CREATE TEMP TABLE IF NOT EXISTS all_nodes (
-                    tid BIGINT,
-                    oid BIGINT,
-                    PRIMARY KEY (tid, oid)
-                  );
-                  TRUNCATE TABLE all_nodes;
-                  
-                  CREATE TEMP TABLE IF NOT EXISTS current_level_it_1 (
-                    tid BIGINT,
-                    oid BIGINT,
-                    PRIMARY KEY (tid, oid)
-                  );
-                  TRUNCATE TABLE current_level_it_1;
+                CREATE OR REPLACE FUNCTION get_dependencies(hint_pod_ids BIGINT[][])
+                    RETURNS TABLE(tid BIGINT, oid BIGINT, chunk BYTEA, level INTEGER)
+                    LANGUAGE plpgsql
+                    AS $$
+                    DECLARE
+                        node_tid BIGINT;
+                        node_oid BIGINT;
+                        iteration BOOLEAN := FALSE;
+                        dep_record RECORD;
+                        curr_record RECORD;
+                    BEGIN
+                        -- Temporary table to store visited nodes and their levels
+                        CREATE TEMP TABLE IF NOT EXISTS current_level_it_0 (
+                            tid BIGINT,
+                            oid BIGINT,
+                            PRIMARY KEY (tid, oid)
+                        );
+                        TRUNCATE TABLE current_level_it_0;
 
-                  -- Initialize current level
-                  FOR i IN 1..array_upper(hint_pod_ids, 1) LOOP
-                      node_tid := hint_pod_ids[i][1];
-                      node_oid := hint_pod_ids[i][2];
-                      INSERT INTO current_level_it_0 (tid, oid) VALUES (node_tid, node_oid);
-                      INSERT INTO all_nodes (tid, oid) VALUES (node_tid, node_oid);
-                  END LOOP;
-                  
+                        CREATE TEMP TABLE IF NOT EXISTS all_nodes (
+                            tid BIGINT,
+                            oid BIGINT,
+                            PRIMARY KEY (tid, oid)
+                        );
+                        TRUNCATE TABLE all_nodes;
 
-                  -- Recursive traversal
-                  LOOP
-                      IF iteration THEN
-                          -- Exit when no more nodes to process at the current level
-                          EXIT WHEN NOT (SELECT EXISTS (SELECT 1 FROM current_level_it_1));
-                          -- Process nodes at the current level
-                          FOR curr_record IN SELECT cl.tid, cl.oid FROM current_level_it_1 cl LOOP
-                              -- Find dependencies of the current node
-                              FOR dep_record IN SELECT pd.dep_pid_tid, pd.dep_pid_oid
-                                                      FROM pod_dependencies pd
-                                                      WHERE pd.pod_id_tid = curr_record.tid AND pd.pod_id_oid = curr_record.oid LOOP
-                                -- Insert the dependency with the next level, if not already in visited_nodes
-                                  IF NOT EXISTS (SELECT 1 FROM all_nodes an WHERE an.tid = dep_record.dep_pid_tid AND an.oid = dep_record.dep_pid_oid) THEN
-                                      INSERT INTO current_level_it_0 (tid, oid)
-                                      VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
-                                      INSERT INTO all_nodes (tid, oid)
-                                      VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
-                                  END IF;
+                        CREATE TEMP TABLE IF NOT EXISTS current_level_it_1 (
+                            tid BIGINT,
+                            oid BIGINT,
+                            PRIMARY KEY (tid, oid)
+                        );
+                        TRUNCATE TABLE current_level_it_1;
 
-                               END LOOP;
-                          END LOOP;
-                          TRUNCATE TABLE current_level_it_1;
-                      ELSE 
-                          -- Exit when no more nodes to process at the current level
-                          EXIT WHEN NOT (SELECT EXISTS (SELECT 1 FROM current_level_it_0));
+                        -- Initialize current level
+                        FOR i IN 1..array_upper(hint_pod_ids, 1) LOOP
+                            node_tid := hint_pod_ids[i][1];
+                            node_oid := hint_pod_ids[i][2];
+                            INSERT INTO current_level_it_0 (tid, oid) VALUES (node_tid, node_oid);
+                            INSERT INTO all_nodes (tid, oid) VALUES (node_tid, node_oid);
+                        END LOOP;
 
-                          -- Process nodes at the current level
-                          FOR curr_record IN SELECT cl.tid, cl.oid FROM current_level_it_0 cl LOOP
-                              -- Find dependencies of the current node
-                              FOR dep_record IN SELECT pd.dep_pid_tid, pd.dep_pid_oid
-                                                      FROM pod_dependencies pd
-                                                      WHERE pd.pod_id_tid = curr_record.tid AND pd.pod_id_oid = curr_record.oid LOOP
-                                -- Insert the dependency with the next level, if not already in visited_nodes
-                                IF NOT EXISTS (SELECT 1 FROM all_nodes an WHERE an.tid = dep_record.dep_pid_tid AND an.oid = dep_record.dep_pid_oid) THEN
-                                    INSERT INTO current_level_it_1 (tid, oid)
-                                    VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
+                        -- Recursive traversal
+                        LOOP
+                            IF iteration THEN
+                                -- Exit when no more nodes to process at the current level
+                                EXIT WHEN NOT (SELECT EXISTS (SELECT 1 FROM current_level_it_1));
+                                -- Process nodes at the current level
+                                FOR curr_record IN SELECT cl.tid, cl.oid FROM current_level_it_1 cl LOOP
+                                    -- Find dependencies of the current node
+                                    FOR dep_record IN SELECT pd.dep_pid_tid, pd.dep_pid_oid
+                                                            FROM pod_dependencies pd
+                                                            WHERE pd.pod_id_tid = curr_record.tid
+                                                                AND pd.pod_id_oid = curr_record.oid LOOP
+                                        -- Insert the dependency with the next level, if not already in visited_nodes
+                                        IF NOT EXISTS (SELECT 1 FROM all_nodes an WHERE an.tid = dep_record.dep_pid_tid
+                                                AND an.oid = dep_record.dep_pid_oid) THEN
+                                            INSERT INTO current_level_it_0 (tid, oid)
+                                            VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
+                                            INSERT INTO all_nodes (tid, oid)
+                                            VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
+                                        END IF;
 
-                                    -- Insert the same dependency into other_table as well
-                                    INSERT INTO all_nodes (tid, oid)
-                                    VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
-                                END IF;
+                                    END LOOP;
+                                END LOOP;
+                                TRUNCATE TABLE current_level_it_1;
+                            ELSE
+                                -- Exit when no more nodes to process at the current level
+                                EXIT WHEN NOT (SELECT EXISTS (SELECT 1 FROM current_level_it_0));
 
-                             END LOOP;
-                           END LOOP;
-                           TRUNCATE TABLE current_level_it_0;
-                      END IF;
+                                -- Process nodes at the current level
+                                FOR curr_record IN SELECT cl.tid, cl.oid FROM current_level_it_0 cl LOOP
+                                    -- Find dependencies of the current node
+                                    FOR dep_record IN SELECT pd.dep_pid_tid, pd.dep_pid_oid
+                                                            FROM pod_dependencies pd
+                                                            WHERE pd.pod_id_tid = curr_record.tid AND
+                                                                    pd.pod_id_oid = curr_record.oid LOOP
+                                        -- Insert the dependency with the next level, if not already in visited_nodes
+                                        IF NOT EXISTS (SELECT 1 FROM all_nodes an WHERE an.tid = dep_record.dep_pid_tid
+                                                                                    AND an.oid = dep_record.dep_pid_oid) THEN
+                                            INSERT INTO current_level_it_1 (tid, oid)
+                                            VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
 
-                      -- Move to the next level
-                      iteration := NOT iteration;
-                  END LOOP;
+                                            -- Insert the same dependency into other_table as well
+                                            INSERT INTO all_nodes (tid, oid)
+                                            VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
+                                        END IF;
 
-                  -- Return the result
-                  RETURN QUERY SELECT * 
-                  FROM pod_storage ps WHERE
-                  (ps.tid, ps.oid) IN (
-                    SELECT an.tid, an.oid
-                    FROM all_nodes an
-                  )
-                  ORDER BY ps.chunk;
-              END;
-              $$;
+                                    END LOOP;
+                                END LOOP;
+                                TRUNCATE TABLE current_level_it_0;
+                            END IF;
+
+                            -- Move to the next level
+                            iteration := NOT iteration;
+                        END LOOP;
+
+                        -- Return the result
+                        RETURN QUERY SELECT *
+                        FROM pod_storage ps WHERE
+                        (ps.tid, ps.oid) IN (
+                            SELECT an.tid, an.oid
+                            FROM all_nodes an
+                        )
+                        ORDER BY ps.chunk;
+                    END;
+                    $$;
             """
             )
             self.db_conn.commit()
+        self.pod_bytes_memo: PodStoragePodBytesMemo = PodStoragePodBytesMemo.new(2_000_000_000)
+        self.synonyms: PodStoragePodIdSynonym = {}
 
     @staticmethod
     def _create_pod_db_if_has_not(host: str, port: int) -> None:
@@ -701,19 +751,42 @@ CREATE OR REPLACE FUNCTION get_dependencies(hint_pod_ids BIGINT[][])
             logger.error(f"Error creating pod database, {e}")
             raise e
 
+    def _get_synonyms_from_db(self, cursor: psycopg2.extensions.cursor, hint_tid_oid_array: List[Tuple]):
+        tid_oid_pairs = ",".join(cursor.mogrify("(%s,%s)", (tid, oid)).decode() for tid, oid in hint_tid_oid_array)
+        if tid_oid_pairs:
+            cursor.execute(f"SELECT * FROM pod_synonyms WHERE (pod_tid, pod_oid) IN ({tid_oid_pairs});")
+            results = cursor.fetchall()
+            for row in results:
+                tid, oid, syn_tid, syn_oid = row
+                self.synonyms[make_pod_id(tid, oid)] = make_pod_id(syn_tid, syn_oid)
+        new_hint_tid_oid_array = []
+        for item in hint_tid_oid_array:
+            pod_id = make_pod_id(item[0], item[1])
+            if pod_id in self.synonyms:
+                new_pid = self.synonyms[pod_id]
+                new_hint_tid_oid_array.append([new_pid.tid, new_pid.oid])
+            else:
+                new_hint_tid_oid_array.append(item)
+        return new_hint_tid_oid_array
+
+    def _prefetch_dependencies(self, cursor: psycopg2.extensions.cursor, hint_tid_oid_array: List[Tuple]):
+        cursor.execute("SELECT * FROM get_dependencies(%s::BIGINT[][])", (hint_tid_oid_array,))
+        results = cursor.fetchall()
+        for row in results:
+            tid, oid, pod_bytes, chunk = row
+            if (tid, oid) not in self.cache:
+                self.cache[(tid, oid)] = b""
+            self.cache[(tid, oid)] += pod_bytes
+
     def writer(self) -> PodWriter:
         return PostgreSQLPodStorageWriter(self)
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
         hint_tid_oid_array = [[p.tid, p.oid] for p in hint_pod_ids]
         with self.db_conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM get_dependencies(%s::BIGINT[][])", (hint_tid_oid_array,))
-            results = cursor.fetchall()
-            for row in results:
-                tid, oid, pod_bytes, chunk = row
-                if (tid, oid) not in self.cache:
-                    self.cache[(tid, oid)] = b""
-                self.cache[(tid, oid)] += pod_bytes
+            new_hint_tid_oid_array = self._get_synonyms_from_db(cursor, hint_tid_oid_array)
+            if new_hint_tid_oid_array:
+                self._prefetch_dependencies(cursor, new_hint_tid_oid_array)
         return PostgreSQLPodStorageReader(self)
 
     def estimate_size(self) -> int:
