@@ -441,8 +441,8 @@ class FilePodStorage(PodStorage):
 
 
 class PostgreSQLPodStorageWriter(PodWriter):
-    CHUNK_SIZE = 1_000_000_00  # 100 MB
-    FLUSH_SIZE = 500_000  # 500 KB
+    CHUNK_SIZE = 9_000_000_00  # 90 MB
+    FLUSH_SIZE = 2_000_000_000  # 5 GB
 
     def __init__(self, storage: PostgreSQLPodStorage) -> None:
         self.storage = storage
@@ -465,15 +465,15 @@ class PostgreSQLPodStorageWriter(PodWriter):
         if self.buf_size == 0:
             return
         with self.storage.db_conn.cursor() as cursor:
-            values_str = ",".join(cursor.mogrify("(%s, %s, %s, %s)", x).decode() for x in self.storage_buffer)
-            query = f"""
+            query = """
                 INSERT INTO pod_storage (tid, oid, chunk, pod_bytes)
-                VALUES {values_str}
+                VALUES (%s, %s, %s, %s)
                 ON CONFLICT (tid, oid, chunk) DO UPDATE SET pod_bytes = EXCLUDED.pod_bytes;
             """
-            cursor.execute(query)
+            cursor.executemany(query, self.storage_buffer)
         self.storage_buffer = []
         self.buf_size = 0
+
 
     def flush_dependencies(self):
         if len(self.dependency_buffer) == 0:
@@ -500,10 +500,6 @@ class PostgreSQLPodStorageWriter(PodWriter):
                 self.buf_size += min(len(pod_bytes), PostgreSQLPodStorageWriter.CHUNK_SIZE)
             else:
                 self.buf_size += min(PostgreSQLPodStorageWriter.CHUNK_SIZE, len(pod_bytes) - i)
-                if self.buf_size < 0:
-                    print("BELOW 0")
-                    print(len(pod_bytes))
-                    print(i)
             self.storage_buffer.append(
                 (
                     pod_id.tid,
@@ -579,68 +575,109 @@ class PostgreSQLPodStorage(PodStorage):
                     dep_pid_oid BIGINT,
                     PRIMARY KEY (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid)
                 );
-            CREATE OR REPLACE FUNCTION get_dependencies(hint_pod_ids BIGINT[][])
-            RETURNS TABLE(tid BIGINT, oid BIGINT, chunk BYTEA, level INTEGER)
-            LANGUAGE plpgsql
-            AS $$
-            DECLARE
-                node_tid BIGINT;
-                node_oid BIGINT;
-                current_level INTEGER := 0;
-                dep_record RECORD;
-            BEGIN
-                -- Temporary table to store visited nodes and their levels
-                CREATE TEMP TABLE IF NOT EXISTS temp_visited_nodes (
+CREATE OR REPLACE FUNCTION get_dependencies(hint_pod_ids BIGINT[][])
+              RETURNS TABLE(tid BIGINT, oid BIGINT, chunk BYTEA, level INTEGER)
+              LANGUAGE plpgsql
+              AS $$
+              DECLARE
+                  node_tid BIGINT;
+                  node_oid BIGINT;
+                  iteration BOOLEAN := FALSE;
+                  dep_record RECORD;
+                  curr_record RECORD;
+              BEGIN
+                  -- Temporary table to store visited nodes and their levels
+                  CREATE TEMP TABLE IF NOT EXISTS current_level_it_0 (
                     tid BIGINT,
                     oid BIGINT,
-                    level INTEGER,
                     PRIMARY KEY (tid, oid)
-                );
-                TRUNCATE TABLE temp_visited_nodes;
+                  );
+                  TRUNCATE TABLE current_level_it_0;
+                  
+                  CREATE TEMP TABLE IF NOT EXISTS all_nodes (
+                    tid BIGINT,
+                    oid BIGINT,
+                    PRIMARY KEY (tid, oid)
+                  );
+                  TRUNCATE TABLE all_nodes;
+                  
+                  CREATE TEMP TABLE IF NOT EXISTS current_level_it_1 (
+                    tid BIGINT,
+                    oid BIGINT,
+                    PRIMARY KEY (tid, oid)
+                  );
+                  TRUNCATE TABLE current_level_it_1;
 
-                -- Initialize visited nodes with hint_pod_ids at level 0
-                FOR i IN 1..array_upper(hint_pod_ids, 1) LOOP
-                    node_tid := hint_pod_ids[i][1];
-                    node_oid := hint_pod_ids[i][2];
-                    INSERT INTO temp_visited_nodes (tid, oid, level) VALUES (node_tid, node_oid, 0);
-                END LOOP;
+                  -- Initialize current level
+                  FOR i IN 1..array_upper(hint_pod_ids, 1) LOOP
+                      node_tid := hint_pod_ids[i][1];
+                      node_oid := hint_pod_ids[i][2];
+                      INSERT INTO current_level_it_0 (tid, oid) VALUES (node_tid, node_oid);
+                      INSERT INTO all_nodes (tid, oid) VALUES (node_tid, node_oid);
+                  END LOOP;
+                  
 
-                -- Recursive traversal
-                LOOP
-                    -- Exit when no more nodes to process at the current level
-                    EXIT WHEN NOT EXISTS (SELECT 1 FROM temp_visited_nodes tvn WHERE tvn.level = current_level);
+                  -- Recursive traversal
+                  LOOP
+                      IF iteration THEN
+                          -- Exit when no more nodes to process at the current level
+                          EXIT WHEN NOT (SELECT EXISTS (SELECT 1 FROM current_level_it_1));
+                          -- Process nodes at the current level
+                          FOR curr_record IN SELECT cl.tid, cl.oid FROM current_level_it_1 cl LOOP
+                              -- Find dependencies of the current node
+                              FOR dep_record IN SELECT pd.dep_pid_tid, pd.dep_pid_oid
+                                                      FROM pod_dependencies pd
+                                                      WHERE pd.pod_id_tid = curr_record.tid AND pd.pod_id_oid = curr_record.oid LOOP
+                                -- Insert the dependency with the next level, if not already in visited_nodes
+                                  IF NOT EXISTS (SELECT 1 FROM all_nodes an WHERE an.tid = dep_record.dep_pid_tid AND an.oid = dep_record.dep_pid_oid) THEN
+                                      INSERT INTO current_level_it_0 (tid, oid)
+                                      VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
+                                      INSERT INTO all_nodes (tid, oid)
+                                      VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
+                                  END IF;
 
-                    -- Process nodes at the current level
-                    FOR dep_record IN SELECT tvn.tid, tvn.oid FROM temp_visited_nodes tvn WHERE tvn.level = current_level LOOP
-                        -- Find dependencies of the current node
-                        FOR dep_record IN SELECT pd.dep_pid_tid, pd.dep_pid_oid
-                                        FROM pod_dependencies pd
-                                        WHERE pd.pod_id_tid = dep_record.tid AND pd.pod_id_oid = dep_record.oid LOOP
-                            -- Insert the dependency with the next level, if not already in visited_nodes
-                            INSERT INTO temp_visited_nodes (tid, oid, level)
-                            VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid, current_level + 1)
-                            ON CONFLICT ON CONSTRAINT temp_visited_nodes_pkey DO NOTHING;
-                        END LOOP;
-                    END LOOP;
+                               END LOOP;
+                          END LOOP;
+                          TRUNCATE TABLE current_level_it_1;
+                      ELSE 
+                          -- Exit when no more nodes to process at the current level
+                          EXIT WHEN NOT (SELECT EXISTS (SELECT 1 FROM current_level_it_0));
 
-                    -- Move to the next level
-                    current_level := current_level + 1;
-                END LOOP;
+                          -- Process nodes at the current level
+                          FOR curr_record IN SELECT cl.tid, cl.oid FROM current_level_it_0 cl LOOP
+                              -- Find dependencies of the current node
+                              FOR dep_record IN SELECT pd.dep_pid_tid, pd.dep_pid_oid
+                                                      FROM pod_dependencies pd
+                                                      WHERE pd.pod_id_tid = curr_record.tid AND pd.pod_id_oid = curr_record.oid LOOP
+                                -- Insert the dependency with the next level, if not already in visited_nodes
+                                IF NOT EXISTS (SELECT 1 FROM all_nodes an WHERE an.tid = dep_record.dep_pid_tid AND an.oid = dep_record.dep_pid_oid) THEN
+                                    INSERT INTO current_level_it_1 (tid, oid)
+                                    VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
 
-                -- Return the result
-                RETURN QUERY SELECT * 
-                FROM pod_storage ps WHERE
-                (ps.tid, ps.oid) IN (
-                    SELECT tvn.tid, tvn.oid
-                    FROM temp_visited_nodes tvn
-                );
+                                    -- Insert the same dependency into other_table as well
+                                    INSERT INTO all_nodes (tid, oid)
+                                    VALUES (dep_record.dep_pid_tid, dep_record.dep_pid_oid);
+                                END IF;
 
-                -- Optionally, you can clean up the temporary table here
-                DROP TABLE temp_visited_nodes;
-            END;
-            $$;
+                             END LOOP;
+                           END LOOP;
+                           TRUNCATE TABLE current_level_it_0;
+                      END IF;
 
+                      -- Move to the next level
+                      iteration := NOT iteration;
+                  END LOOP;
 
+                  -- Return the result
+                  RETURN QUERY SELECT * 
+                  FROM pod_storage ps WHERE
+                  (ps.tid, ps.oid) IN (
+                    SELECT an.tid, an.oid
+                    FROM all_nodes an
+                  )
+                  ORDER BY ps.chunk;
+              END;
+              $$;
             """
             )
             self.db_conn.commit()
