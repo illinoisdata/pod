@@ -9,15 +9,45 @@ services:
       - ${PWD}:/pod
     working_dir: /pod
     command: ["/bin/bash"]
+
   podpsql:
-    image: postgres
+    image: postgres:16.1-bookworm
     hostname: podpsql
     tty: true
     stdin_open: true
-    volumes:
-      - ${PWD}:/pod
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    working_dir: /pod
-    command: ["postgres", "-p", "5433"]
+    command: ["postgres", "-p", "5432"]
+
+  podredis:
+    image: redis:7.2.4-bookworm
+    hostname: podredis
+    tty: true
+    stdin_open: true
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--port", "6379"]
+
+  podneo4j:
+    # image: neo4j:5.15.0-community-bullseye
+    image: neo4j:5.15.0-enterprise-bullseye
+    hostname: podneo4j
+    tty: true
+    stdin_open: true
+    volumes:
+      - neo4j_data:/data
+    environment:
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"  # Using Neo4j Developer License (https://neo4j.com/licensing/)
+      NEO4J_AUTH: neo4j/podneo4jPassword
+    command: ["neo4j"]
+
+  podmongo:
+    image: mongo:7.0.5-jammy
+    hostname: podmongo
+    tty: true
+    stdin_open: true
+
+volumes:
+  redis_data:
+  neo4j_data:

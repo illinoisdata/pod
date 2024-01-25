@@ -23,7 +23,11 @@ python pod/plot.py exp1batch --batch_args \
 """
 
 
-def set_fontsize(ax: matplotlib.axes.Axes, fontsize: float) -> None:
+def set_fontsize(
+    ax: matplotlib.axes.Axes,
+    fontsize: float,
+    minor_fontsize: float,
+) -> None:
     for item in [
         ax.title,
         ax.xaxis.label,
@@ -34,6 +38,13 @@ def set_fontsize(ax: matplotlib.axes.Axes, fontsize: float) -> None:
         *ax.get_yticklabels(),
     ]:
         item.set_fontsize(fontsize)
+    for item in [
+        ax.xaxis.get_offset_text(),
+        ax.yaxis.get_offset_text(),
+        *ax.get_xticklabels(),
+        *ax.get_yticklabels(),
+    ]:
+        item.set_fontsize(minor_fontsize)
 
 
 @dataclass
@@ -164,26 +175,35 @@ def plot_exp1batch(argv: List[str]) -> None:
         ax = axs[0]
         ax.boxplot(dump_times, labels=labels, vert=False)
         ax.set_xlabel("Dump Latency (s)")
+        ax.minorticks_on()
+        ax.yaxis.set_tick_params(which="minor", bottom=False)
+        ax.set_title(f"{single.name}")
 
         # Plot load time.
         ax = axs[1]
         ax.boxplot(load_times, labels=labels, vert=False)
         ax.set_xlabel("Load Latency (s)")
+        ax.minorticks_on()
+        ax.yaxis.set_tick_params(which="minor", bottom=False)
 
         # Plot dump stroage increments.
         ax = axs[2]
         ax.barh(list(range(len(dump_final_storage_gb))), dump_final_storage_gb)
         ax.set_xlabel("Storage (GB)")
-        ax.set_yticks(list(range(len(dump_final_storage_gb))))
+        ax.set_yticks(list(range(len(labels))))
         ax.set_yticklabels(labels)
+        ax.minorticks_on()
+        ax.yaxis.set_tick_params(which="minor", bottom=False)
 
         # Plot dump stroage increments.
         ax = axs[3]
         ax.boxplot(dump_storage_inc_gb, labels=labels, vert=False)
         ax.set_xlabel("Storage inc. (GB)")
+        ax.minorticks_on()
+        ax.yaxis.set_tick_params(which="minor", bottom=False)
 
     for ax in axes.flatten():
-        set_fontsize(ax, 7)
+        set_fontsize(ax, 7, 5)
 
     fig.tight_layout()
     plt.show()
