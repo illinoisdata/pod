@@ -2,7 +2,8 @@
 Key-value storages with correlated/poset reads
 """
 
-from __future__ import annotations
+from __future__ import annotations  # isort:skip
+import pod.__pickle__  ## noqa, isort:skip
 
 import glob
 import io
