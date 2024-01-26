@@ -117,7 +117,6 @@ class RandomMutatingListCells(NotebookCells):
             return (
                 "import secrets\n"
                 "import random\n"
-                "d = 'ddd'; e = 'eee'; b = [d, e]; c = [d, e]; a = [b, c]\n"
                 "def f():\n"  # Test pickling functions.
                 "  def g():\n"
                 "    return 0\n"

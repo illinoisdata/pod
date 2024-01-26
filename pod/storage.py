@@ -772,7 +772,7 @@ class PostgreSQLPodStorage(PodStorage):
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
         if len(hint_pod_ids) == 0:
-            return
+            return PostgreSQLPodStorageReader(self)
         hint_tid_oid_array = [[p.tid, p.oid] for p in hint_pod_ids]
         with self.db_conn.cursor() as cursor:
             self._prefetch_dependencies(cursor, hint_tid_oid_array)
