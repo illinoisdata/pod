@@ -2,7 +2,8 @@
 Key-value storages with correlated/poset reads
 """
 
-from __future__ import annotations
+from __future__ import annotations  # isort:skip
+import pod.__pickle__  ## noqa, isort:skip
 
 import glob
 import io
@@ -11,14 +12,14 @@ import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Queue
-from typing import Any, Dict, List, Set, Tuple, cast
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
+import neo4j
 import psycopg2
 import pymongo
 import redis
 from dataclasses_json import dataclass_json
 from loguru import logger
-from neo4j import GraphDatabase
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 from pod.common import PodId, make_pod_id
@@ -286,7 +287,7 @@ class FilePodStorageReader(PodReader):
         return io.BytesIO(page[resolved_pid])
 
     # def __del__(self) -> None:  # stat_cache_pfl
-    # self.cache_stat.summary()  # stat_cache_pfl
+    #     self.cache_stat.summary()  # stat_cache_pfl
 
 
 class FilePodStorage(PodStorage):
@@ -876,7 +877,7 @@ class Neo4jPodStorageWriter(PodWriter):
         self.flush_data()
 
     def flush_data(self):
-        with self.storage.driver.session() as session:
+        with self.storage.session() as session:
             with session.begin_transaction() as tx:
                 # Write the pod
                 tx.run(
@@ -911,7 +912,7 @@ class Neo4jPodStorageReader(PodReader):
         serialized_pod_id = serialize_pod_id(pod_id)
         if serialized_pod_id in self.storage.cache:
             return self.storage.cache[serialized_pod_id]
-        with self.storage.driver.session() as session:
+        with self.storage.session() as session:
             result = session.run("MATCH (p:Pod {pod_id: $pod_id}) RETURN p.pod_bytes", pod_id=serialized_pod_id)
             record = result.single()
         if record is None:
@@ -923,18 +924,24 @@ class Neo4jPodStorageReader(PodReader):
 
 
 class Neo4jPodStorage(PodStorage):
-    def __init__(self, uri: str, port: int) -> None:
-        self.driver = GraphDatabase.driver(f"{uri}:{port}", auth=("neo4j", "pod_neo4j"))
-        with self.driver.session() as session:
+    def __init__(self, uri: str, port: int, password: str, database: Optional[str] = None) -> None:
+        self.driver = neo4j.GraphDatabase.driver(f"{uri}:{port}", auth=("neo4j", password))
+        self.database = database
+        with self.session() as session:
             session.run("CREATE INDEX pod_id_index IF NOT EXISTS FOR (p:Pod) ON (p.pod_id);")
         self.cache: Dict[bytes, io.BytesIO] = {}
+
+    def session(self) -> neo4j.Session:
+        if self.database is not None:
+            return self.driver.session(database=self.database)
+        return self.driver.session()
 
     def writer(self) -> PodWriter:
         return Neo4jPodStorageWriter(self)
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
         serialized_pod_ids = [serialize_pod_id(pid) for pid in hint_pod_ids]
-        with self.driver.session() as session:
+        with self.session() as session:
             query = """
             UNWIND $pod_ids AS pod_id
             MATCH (p:Pod {pod_id: pod_id})
