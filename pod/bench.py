@@ -109,6 +109,7 @@ class RandomMutatingListCells(NotebookCells):
             return (
                 "import secrets\n"
                 "import random\n"
+                "d = 'ddd'; e = 'eee'; b = [d, e]; c =  [d, e]; a = [b, c]\n"
                 "def f():\n"
                 "  def g():\n"
                 "    return 0\n"
@@ -116,7 +117,8 @@ class RandomMutatingListCells(NotebookCells):
                 "l = [\n"
                 f"  secrets.token_bytes({self.elem_size})\n"
                 f"  for idx in range({self.list_size})\n"
-                "]; l2 = [l]; l.append(l2)"  # <-- self-ref
+                "]\n"
+                "l2 = [l]; l.append(l2)"  # Test self-referential objects.
             )
 
         # Mutate elements randomly.
