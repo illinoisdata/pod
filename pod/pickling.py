@@ -106,10 +106,11 @@ class StaticPodPicklerMemo:
         self.latest_page_offset: MemoId = 0
 
     def next_page_offset(self, pid: PodId) -> MemoId:  # Next ID.
+        page_offset = self.latest_page_offset
         self.latest_page_offset += StaticPodPicklerMemo.PAGE_SIZE
-        self.page_pid[self.latest_page_offset] = pid
-        assert self.latest_page_offset < StaticPodPicklerMemo.VIRTUAL_OFFSET
-        return self.latest_page_offset
+        self.page_pid[page_offset] = pid
+        assert page_offset < StaticPodPicklerMemo.VIRTUAL_OFFSET
+        return page_offset
 
     def __setitem__(self, obj_id: ObjectId, val: Tuple[MemoId, Object]) -> None:
         self.physical_memo[obj_id] = val
@@ -123,6 +124,7 @@ class StaticPodPicklerMemo:
 
     def clear(self) -> None:
         self.physical_memo.clear()
+        self.page_pid.clear()
         self.latest_page_offset = 0
 
     def next_view(self, pid: PodId) -> StaticPodPicklerMemoView:
@@ -143,9 +145,10 @@ class StaticPodPicklerMemoView:
     def __setitem__(self, obj_id: ObjectId, val: Tuple[MemoId, Object]) -> None:
         assert val[0] == self.next_id
         page_idx = val[0] // StaticPodPicklerMemo.PAGE_SIZE
+        local_offset = val[0] % StaticPodPicklerMemo.PAGE_SIZE
         if page_idx >= len(self.page_offsets):
             self.page_offsets.append(self.memo.next_page_offset(self.pid))
-        self.memo[obj_id] = (val[0] + self.page_offsets[page_idx], val[1])
+        self.memo[obj_id] = (local_offset + self.page_offsets[page_idx], val[1])
         self.next_id += 1
 
     def __getitem__(self, obj_id: ObjectId) -> Tuple[MemoId, Object]:
@@ -154,7 +157,7 @@ class StaticPodPicklerMemoView:
         if page_idx >= 0 and memo_id < self.page_offsets[page_idx] + StaticPodPicklerMemo.PAGE_SIZE:
             # Implicit: self.page_offsets[page_idx] <= memo_id.
             assert self.next_id > 0
-            memo_id = (memo_id - self.page_offsets[page_idx]) + page_idx * StaticPodPicklerMemo.VIRTUAL_OFFSET
+            memo_id = (memo_id - self.page_offsets[page_idx]) + page_idx * StaticPodPicklerMemo.PAGE_SIZE
         else:
             memo_id += StaticPodPicklerMemo.VIRTUAL_OFFSET
             self.dep_pids.add(dep_pid)
