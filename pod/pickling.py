@@ -149,11 +149,11 @@ class StaticPodPicklerMemoView:
         self.next_id += 1
 
     def __getitem__(self, obj_id: ObjectId) -> Tuple[MemoId, Object]:
-        assert self.next_id > 0
         memo_id, obj, dep_pid = self.memo[obj_id]
         page_idx = bisect_right(self.page_offsets, memo_id) - 1
         if page_idx >= 0 and memo_id < self.page_offsets[page_idx] + StaticPodPicklerMemo.PAGE_SIZE:
             # Implicit: self.page_offsets[page_idx] <= memo_id.
+            assert self.next_id > 0
             memo_id = (memo_id - self.page_offsets[page_idx]) + page_idx * StaticPodPicklerMemo.VIRTUAL_OFFSET
         else:
             memo_id += StaticPodPicklerMemo.VIRTUAL_OFFSET
