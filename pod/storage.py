@@ -514,13 +514,13 @@ class PostgreSQLPodStorageWriter(PodWriter):
         pod_id: PodId,
         pod_bytes: bytes,
     ) -> None:
-        pod_bytes_memview = memoryview(pod_bytes)
         if pod_bytes in self.storage.pod_bytes_memo:
             # Save as synonymous pids.
             same_pod_id = self.storage.pod_bytes_memo.get(pod_bytes)
             self.new_pid_synonyms.append((pod_id.tid, pod_id.oid, same_pod_id.tid, same_pod_id.oid))
         else:
             # New pod bytes.
+            pod_bytes_memview = memoryview(pod_bytes)
             self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
             for i in range(0, len(pod_bytes), PostgreSQLPodStorageWriter.CHUNK_SIZE):
                 self.buf_size += min(PostgreSQLPodStorageWriter.CHUNK_SIZE, len(pod_bytes) - i)
@@ -529,7 +529,7 @@ class PostgreSQLPodStorageWriter(PodWriter):
                         pod_id.tid,
                         pod_id.oid,
                         int(i / PostgreSQLPodStorageWriter.CHUNK_SIZE),
-                        pod_bytes_memview[i: i + PostgreSQLPodStorageWriter.CHUNK_SIZE],
+                        pod_bytes_memview[i : i + PostgreSQLPodStorageWriter.CHUNK_SIZE],
                     )
                 )
                 if self.buf_size > PostgreSQLPodStorageWriter.FLUSH_SIZE:
@@ -773,7 +773,7 @@ class PostgreSQLPodStorage(PodStorage):
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
         if len(hint_pod_ids) == 0:
             return PostgreSQLPodStorageReader(self)
-        hint_tid_oid_array = [[p.tid, p.oid] for p in hint_pod_ids]
+        hint_tid_oid_array = [(p.tid, p.oid) for p in hint_pod_ids]
         with self.db_conn.cursor() as cursor:
             self._prefetch_dependencies(cursor, hint_tid_oid_array)
         return PostgreSQLPodStorageReader(self)

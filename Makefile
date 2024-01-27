@@ -32,7 +32,7 @@ fmt:              ## Format code using black & isort.
 
 .PHONY: lint
 lint:             ## Run pep8, black, mypy linters.
-	$(ENV_PREFIX)flake8 --max-line-length 127 pod/
+	$(ENV_PREFIX)flake8 --ignore=E203 --max-line-length 127 pod/
 	$(ENV_PREFIX)black -l 127 --check pod/
 	$(ENV_PREFIX)black -l 127 --check tests/
 	$(ENV_PREFIX)mypy --ignore-missing-imports pod/
