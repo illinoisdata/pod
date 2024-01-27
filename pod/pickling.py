@@ -102,18 +102,21 @@ class StaticPodPicklerMemo:
 
     def __init__(self) -> None:
         self.physical_memo: Dict[ObjectId, Tuple[MemoId, Object]] = {}
+        self.page_pid: Dict[MemoId, PodId] = {}
         self.latest_page_offset: MemoId = 0
 
-    def next_page_offset(self) -> MemoId:  # Next ID.
+    def next_page_offset(self, pid: PodId) -> MemoId:  # Next ID.
         self.latest_page_offset += StaticPodPicklerMemo.PAGE_SIZE
+        self.page_pid[self.latest_page_offset] = pid
         assert self.latest_page_offset < StaticPodPicklerMemo.VIRTUAL_OFFSET
         return self.latest_page_offset
 
     def __setitem__(self, obj_id: ObjectId, val: Tuple[MemoId, Object]) -> None:
         self.physical_memo[obj_id] = val
 
-    def __getitem__(self, obj_id: ObjectId) -> Tuple[MemoId, Object]:
-        return self.physical_memo[obj_id]
+    def __getitem__(self, obj_id: ObjectId) -> Tuple[MemoId, Object, PodId]:
+        memo_id, obj = self.physical_memo[obj_id]
+        return memo_id, obj, self.page_pid[memo_id - memo_id % StaticPodPicklerMemo.PAGE_SIZE]
 
     def __contains__(self, obj_id: ObjectId) -> bool:
         return obj_id in self.physical_memo
@@ -122,15 +125,17 @@ class StaticPodPicklerMemo:
         self.physical_memo.clear()
         self.latest_page_offset = 0
 
-    def next_view(self) -> StaticPodPicklerMemoView:
-        return StaticPodPicklerMemoView(self, self.next_page_offset())
+    def next_view(self, pid: PodId) -> StaticPodPicklerMemoView:
+        return StaticPodPicklerMemoView(self, pid)
 
 
 class StaticPodPicklerMemoView:
-    def __init__(self, memo: StaticPodPicklerMemo, first_offset: MemoId) -> None:
+    def __init__(self, memo: StaticPodPicklerMemo, pid: PodId) -> None:
         self.memo: StaticPodPicklerMemo = memo
-        self.page_offsets: List[MemoId] = [first_offset]
+        self.pid = pid
+        self.page_offsets: List[MemoId] = [self.memo.next_page_offset(self.pid)]
         self.next_id = 0
+        self.dep_pids: Set[PodId] = set()
 
     def __len__(self) -> MemoId:  # Next ID
         return self.next_id
@@ -139,18 +144,20 @@ class StaticPodPicklerMemoView:
         assert val[0] == self.next_id
         page_idx = val[0] // StaticPodPicklerMemo.PAGE_SIZE
         if page_idx >= len(self.page_offsets):
-            self.page_offsets.append(self.memo.next_page_offset())
+            self.page_offsets.append(self.memo.next_page_offset(self.pid))
         self.memo[obj_id] = (val[0] + self.page_offsets[page_idx], val[1])
         self.next_id += 1
 
     def __getitem__(self, obj_id: ObjectId) -> Tuple[MemoId, Object]:
         assert self.next_id > 0
-        memo_id, obj = self.memo[obj_id]
+        memo_id, obj, dep_pid = self.memo[obj_id]
         page_idx = bisect_right(self.page_offsets, memo_id) - 1
-        if self.page_offsets[page_idx] <= memo_id < self.page_offsets[page_idx] + StaticPodPicklerMemo.PAGE_SIZE:
+        if page_idx >= 0 and memo_id < self.page_offsets[page_idx] + StaticPodPicklerMemo.PAGE_SIZE:
+            # Implicit: self.page_offsets[page_idx] <= memo_id.
             memo_id = (memo_id - self.page_offsets[page_idx]) + page_idx * StaticPodPicklerMemo.VIRTUAL_OFFSET
         else:
             memo_id += StaticPodPicklerMemo.VIRTUAL_OFFSET
+            self.dep_pids.add(dep_pid)
         return (memo_id, obj)
 
     def __contains__(self, obj_id: ObjectId) -> bool:
@@ -159,6 +166,9 @@ class StaticPodPicklerMemoView:
     def get(self, obj_id: ObjectId) -> Optional[Tuple[MemoId, Object]]:
         return self[obj_id] if obj_id in self.memo else None
 
+    def get_dep_pids(self) -> Set[PodId]:
+        return self.dep_pids
+
     # def clear(self) -> None:
     #     raise NotImplementedError("Not yet implemented")
 
@@ -166,9 +176,6 @@ class StaticPodPicklerMemoView:
 class StaticPodUnpicklerMemo:
     def __init__(self) -> None:
         self.physical_memo: Dict[MemoId, Object] = {}
-
-    def next_page_offset(self) -> MemoId:
-        return len(self.physical_memo)
 
     def __setitem__(self, memo_id: MemoId, obj: Object) -> None:
         self.physical_memo[memo_id] = obj
@@ -297,16 +304,16 @@ class BaseStaticPodPickler(BasePickler):
 class FinalPodPickler(BaseStaticPodPickler):
     def __init__(
         self,
+        root_pid: PodId,
         ctx: StaticPodPicklerContext,
         file: io.IOBase,
         pickle_kwargs: Dict[str, Any] = {},
     ) -> None:
         BaseStaticPodPickler.__init__(self, file, **pickle_kwargs)
-        self.memo = ctx.memo.next_view()
+        self.memo = ctx.memo.next_view(root_pid)
 
     def get_root_deps(self) -> Set[PodId]:
-        # TODO: Read from memo?
-        return set()
+        return self.memo.get_dep_pids()
 
 
 class StaticPodPickler(BaseStaticPodPickler):
@@ -371,7 +378,7 @@ class StaticPodPickler(BaseStaticPodPickler):
         self.pickle_kwargs = pickle_kwargs
 
         # Replace memo with virtual view memo.
-        self.memo = self.ctx.memo.next_view()
+        self.memo = self.ctx.memo.next_view(root_pid)
 
     def persistent_id(self, obj: Object) -> Optional[ObjectId]:
         if isinstance(obj, StaticPodPickler.BUNDLE_TYPES):
@@ -396,7 +403,7 @@ class StaticPodPickler(BaseStaticPodPickler):
         return oid
 
     def get_root_deps(self) -> Set[PodId]:
-        return self.root_deps
+        return self.root_deps | self.memo.get_dep_pids()
 
     @staticmethod
     def dump_and_pod_write(
@@ -414,7 +421,7 @@ class StaticPodPickler(BaseStaticPodPickler):
         # Pickle this object into a new buffer.
         this_buffer = io.BytesIO()
         this_pickler = (
-            FinalPodPickler(ctx, this_buffer, **pickle_kwargs)
+            FinalPodPickler(this_pid, ctx, this_buffer, **pickle_kwargs)
             if is_final
             else StaticPodPickler(this_obj, this_pid, ctx, writer, this_buffer, pickle_kwargs)
         )
@@ -424,7 +431,7 @@ class StaticPodPickler(BaseStaticPodPickler):
 
         # Write to pod storage.
         writer.write_pod(this_pid, this_pod_bytes)
-        ctx.dependency_maps[this_pid] = set() if is_final else this_pickler.get_root_deps()
+        ctx.dependency_maps[this_pid] = this_pickler.get_root_deps()
 
         # pod_pickling_stat.append(this_pid, this_obj, this_pod_bytes)  # stat_staticppick
 
