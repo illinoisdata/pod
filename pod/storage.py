@@ -114,6 +114,7 @@ class PodBytesMemo:
 
 
 PodIdSynonym = Dict[PodId, PodId]
+SerializedPodId = bytes
 
 """ Dictionary-based storage (ephemeral, for experimental uses) """
 
@@ -992,7 +993,7 @@ class MongoPodStorageWriter(PodWriter):
         self.storage = storage
         self.pods: List[Tuple[PodId, bytes]] = []
         self.dependency_map: Dict[PodId, Set[PodId]] = {}
-        self.new_pid_synonyms: Dict[bytes, bytes] = {}
+        self.new_pid_synonyms: Dict[SerializedPodId, SerializedPodId] = {}
 
     def __enter__(self):
         return self
@@ -1004,11 +1005,11 @@ class MongoPodStorageWriter(PodWriter):
         all_docs = []
         deps_list = []
         for serialized_pod_id, pod_bytes in self.pods:
-            is_synonym = False
-            if serialized_pod_id in self.new_pid_synonyms:
-                is_synonym = True
+            is_synonym = serialized_pod_id in self.new_pid_synonyms
+            if is_synonym:
                 self.storage.synonyms[serialized_pod_id] = self.new_pid_synonyms[serialized_pod_id]
-            current_docs, deps = self.construct_documents(serialized_pod_id, pod_bytes, is_synonym)
+            current_docs = self.construct_pod_documents(serialized_pod_id, pod_bytes, is_synonym)
+            deps = self.construct_dependency_documents(serialized_pod_id)  # Assumes all pod bytes and dependencies are written
             all_docs.extend(current_docs)
             deps_list.append(deps)
         self.storage.db.pod_storage.insert_many(all_docs)
@@ -1017,22 +1018,19 @@ class MongoPodStorageWriter(PodWriter):
         self.dependency_map = {}
         self.new_pid_synonyms = {}
 
-    def construct_documents(self, serialized_pod_id: bytes, pod_bytes: bytes, is_synonym: bool):
-        deps_list = []
-        if serialized_pod_id in self.dependency_map:
-            deps_list = [serialize_pod_id(dep_pid) for dep_pid in self.dependency_map[serialized_pod_id] if self.dependency_map[serialized_pod_id]]
-        docs = []
+    def construct_pod_documents(self, serialized_pod_id: SerializedPodId, pod_bytes: bytes, is_synonym: bool):
         if not is_synonym:
             pod_bytes_memview = memoryview(pod_bytes)
-            for i in range(0, len(pod_bytes), MongoPodStorageWriter.MAX_BYTES_SIZE):
-                doc = {"pod_id": serialized_pod_id, "chunk": i, "pod_bytes": pod_bytes_memview[i: i + MongoPodStorageWriter.MAX_BYTES_SIZE].tobytes()}
-                docs.append(doc)
+            return [
+                {"pod_id": serialized_pod_id, "chunk": i, "pod_bytes": pod_bytes_memview[i: i + MongoPodStorageWriter.MAX_BYTES_SIZE].tobytes()}
+                for i in range(0, len(pod_bytes), MongoPodStorageWriter.MAX_BYTES_SIZE)]
         else:
-            doc = {"pod_id": serialized_pod_id, "synonym": self.new_pid_synonyms[serialized_pod_id]}
-            docs.append(doc)
+            return [{"pod_id": serialized_pod_id, "synonym": self.new_pid_synonyms[serialized_pod_id]}]
 
+    def construct_dependency_documents(self, serialized_pod_id: SerializedPodId):
+        deps_list = [serialize_pod_id(dep_pid) for dep_pid in self.dependency_map[serialized_pod_id] if serialized_pod_id in self.dependency_map]
         deps = {"pod_id": serialized_pod_id, "dependencies" : deps_list}
-        return docs, deps
+        return deps
 
     def write_pod(
         self,
@@ -1083,7 +1081,7 @@ class MongoPodStorage(PodStorage):
         self.db = self.mongo_client.pod
         self.db.pod_storage.create_index("pod_id")
         self.db.pod_dependencies.create_index("pod_id")
-        self.cache: Dict[bytes, io.BytesIO] = {}
+        self.cache: Dict[SerializedPodId, io.BytesIO] = {}
         self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
         self.synonyms: PodIdSynonym = {}
         self._fetch_synonyms()
