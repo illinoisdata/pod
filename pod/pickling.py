@@ -202,14 +202,14 @@ class StaticPodUnpicklerMemoView:
     def __setitem__(self, memo_id: MemoId, obj: Object) -> None:
         assert memo_id == self.next_id
         page_idx = memo_id // StaticPodPicklerMemo.PAGE_SIZE
-        memo_id += self.page_offsets[page_idx]
+        memo_id = memo_id % StaticPodPicklerMemo.PAGE_SIZE + self.page_offsets[page_idx]
         self.memo[memo_id] = obj
         self.next_id += 1
 
-    def __getitem__(self, memo_id: ObjectId) -> Object:
+    def __getitem__(self, memo_id: MemoId) -> Object:
         if memo_id < StaticPodPicklerMemo.VIRTUAL_OFFSET:
             page_idx = memo_id // StaticPodPicklerMemo.PAGE_SIZE
-            memo_id += self.page_offsets[page_idx]
+            memo_id = memo_id % StaticPodPicklerMemo.PAGE_SIZE + self.page_offsets[page_idx]
         else:
             memo_id -= StaticPodPicklerMemo.VIRTUAL_OFFSET
         return self.memo[memo_id]
