@@ -114,6 +114,7 @@ class PodBytesMemo:
 
 
 PodIdSynonym = Dict[PodId, PodId]
+SerializedPodId = bytes
 
 """ Dictionary-based storage (ephemeral, for experimental uses) """
 
@@ -987,10 +988,12 @@ class Neo4jPodStorage(PodStorage):
 
 
 class MongoPodStorageWriter(PodWriter):
+    MAX_BYTES_SIZE = 15_000_000 # 15 MB
     def __init__(self, storage: MongoPodStorage) -> None:
         self.storage = storage
         self.pods: List[Tuple[PodId, bytes]] = []
         self.dependency_map: Dict[PodId, Set[PodId]] = {}
+        self.new_pid_synonyms: Dict[SerializedPodId, SerializedPodId] = {}
 
     def __enter__(self):
         return self
@@ -999,34 +1002,55 @@ class MongoPodStorageWriter(PodWriter):
         self.flush_data()
 
     def flush_data(self):
-        docs = []
-        for pod_id, pod_bytes in self.pods:
-            doc = self.construct_document(pod_id, pod_bytes)
-            docs.append(doc)
-        self.storage.collection.insert_many(docs)
+        all_docs = []
+        deps_list = []
+        for serialized_pod_id, pod_bytes in self.pods:
+            is_synonym = serialized_pod_id in self.new_pid_synonyms
+            if is_synonym:
+                self.storage.synonyms[serialized_pod_id] = self.new_pid_synonyms[serialized_pod_id]
+            current_docs = self.construct_pod_documents(serialized_pod_id, pod_bytes, is_synonym)
+            deps = self.construct_dependency_documents(serialized_pod_id)  # Assumes all pod bytes and dependencies are written
+            all_docs.extend(current_docs)
+            deps_list.append(deps)
+        self.storage.db.pod_storage.insert_many(all_docs)
+        self.storage.db.pod_dependencies.insert_many(deps_list)
         self.pods = []
         self.dependency_map = {}
+        self.new_pid_synonyms = {}
 
-    def construct_document(self, pod_id: PodId, pod_bytes: bytes):
-        deps_list = []
-        if pod_id in self.dependency_map:
-            deps_list = [serialize_pod_id(dep_pid) for dep_pid in self.dependency_map[pod_id] if self.dependency_map[pod_id]]
-        doc = {"_id": serialize_pod_id(pod_id), "pod_bytes": pod_bytes, "dependencies": deps_list}
-        return doc
+    def construct_pod_documents(self, serialized_pod_id: SerializedPodId, pod_bytes: bytes, is_synonym: bool):
+        if not is_synonym:
+            pod_bytes_memview = memoryview(pod_bytes)
+            return [
+                {"pod_id": serialized_pod_id, "chunk": i, "pod_bytes": pod_bytes_memview[i: i + MongoPodStorageWriter.MAX_BYTES_SIZE].tobytes()}
+                for i in range(0, len(pod_bytes), MongoPodStorageWriter.MAX_BYTES_SIZE)]
+        else:
+            return [{"pod_id": serialized_pod_id, "synonym": self.new_pid_synonyms[serialized_pod_id]}]
+
+    def construct_dependency_documents(self, serialized_pod_id: SerializedPodId):
+        deps_list = [serialize_pod_id(dep_pid) for dep_pid in self.dependency_map[serialized_pod_id] if serialized_pod_id in self.dependency_map]
+        deps = {"pod_id": serialized_pod_id, "dependencies" : deps_list}
+        return deps
 
     def write_pod(
         self,
         pod_id: PodId,
         pod_bytes: bytes,
     ) -> None:
-        self.pods.append((pod_id, pod_bytes))
+        serialized_pod_id = serialize_pod_id(pod_id)
+        if pod_bytes in self.storage.pod_bytes_memo:
+            self.new_pid_synonyms[serialized_pod_id] = serialize_pod_id(self.storage.pod_bytes_memo.get(pod_bytes))
+            self.pods.append((serialized_pod_id, None))
+        else:
+            self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
+            self.pods.append((serialized_pod_id, pod_bytes))
 
     def write_dep(
         self,
         pod_id: PodId,
         dep_pids: Set[PodId],  # List of pids this pod depends on.
     ) -> None:
-        self.dependency_map[pod_id] = dep_pids
+        self.dependency_map[serialize_pod_id(pod_id)] = dep_pids
 
 
 class MongoPodStorageReader(PodReader):
@@ -1035,46 +1059,87 @@ class MongoPodStorageReader(PodReader):
 
     def read(self, pod_id: PodId) -> io.IOBase:
         serialized_pod_id = serialize_pod_id(pod_id)
-        if serialized_pod_id in self.storage.cache:
-            return self.storage.cache[serialized_pod_id]
-        result = self.storage.collection.find_one({"_id": serialized_pod_id})
-        if result is None or "pod_bytes" not in result:
-            raise KeyError(f"Data not found for Pod ID: {pod_id}")
-        return io.BytesIO(result["pod_bytes"])
+        if serialized_pod_id in self.storage.synonyms:
+            serialized_pod_id = self.storage.synonyms[serialized_pod_id]
+        if serialized_pod_id not in self.storage.cache:
+            cursor = self.storage.db.pod_storage.find({"pod_id": serialized_pod_id}).sort({"chunk": 1})
+            pod_byte_array = bytearray()
+            for result in cursor:
+                if "pod_bytes" in result:
+                    pod_byte_array.extend(result["pod_bytes"])
+                else:
+                    raise ValueError(f"Invalid chunk for pod id: {pod_id}")
+            if len(pod_byte_array) == 0:
+                raise KeyError(f"Data not found for Pod ID: {pod_id}")
+            self.storage.cache[serialized_pod_id] = pod_byte_array
+        return io.BytesIO(self.storage.cache[serialized_pod_id])
 
 
 class MongoPodStorage(PodStorage):
     def __init__(self, host: str, port: int) -> None:
         self.mongo_client: pymongo.MongoClient = pymongo.MongoClient(host=host, port=port)
         self.db = self.mongo_client.pod
-        self.collection = self.db.pod
-        self.cache: Dict[bytes, io.BytesIO] = {}
+        self.db.pod_storage.create_index("pod_id")
+        self.db.pod_dependencies.create_index("pod_id")
+        self.cache: Dict[SerializedPodId, io.BytesIO] = {}
+        self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
+        self.synonyms: PodIdSynonym = {}
+        self._fetch_synonyms()
+
+    def _fetch_synonyms(self):
+        synonyms = self.db.pod_storage.find({ "synonym": { "$exists": True } }, {"_id" : 0})
+        for row in synonyms:
+            self.synonyms[row["pod_id"]] = row["synonym"]
 
     def writer(self) -> PodWriter:
         return MongoPodStorageWriter(self)
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
-        serialized_hint_pod_ids = [serialize_pod_id(pid) for pid in hint_pod_ids]
-        pipeline: List[Dict[str, Any]] = [
-            {"$match": {"_id": {"$in": serialized_hint_pod_ids}}},
-            {
-                "$graphLookup": {
-                    "from": "pod",  # replace with your collection name
-                    "startWith": "$_id",
-                    "connectFromField": "dependencies",
-                    "connectToField": "_id",
-                    "as": "all_dependencies",
-                }
-            },
-            {"$project": {"_id": 1, "pod_bytes": 1, "all_dependencies._id": 1, "all_dependencies.pod_bytes": 1}},
-        ]
-        result = self.collection.aggregate(pipeline)
-        for doc in result:
-            self.cache[doc["_id"]] = io.BytesIO(doc["pod_bytes"])
-            for dep in doc.get("all_dependencies", []):
-                self.cache[dep["_id"]] = io.BytesIO(dep["pod_bytes"])
+        # serialized_hint_pod_ids = [serialize_pod_id(pid) for pid in hint_pod_ids]
+        # pipeline = [
+        #     {"$match": {"pod_id": {"$in": serialized_hint_pod_ids}}},
+        #     {
+        #         "$graphLookup": {
+        #             "from": "pod_dependencies",
+        #             "startWith": "$pod_id",
+        #             "connectFromField": "dependencies",
+        #             "connectToField": "pod_id",
+        #             "as": "all_dependencies"
+        #         }
+        #     },
+        #     {
+        #         "$project": {
+        #             "all_pod_ids": {
+        #                 "$setUnion": [
+        #                     ["$pod_id"], 
+        #                     "$all_dependencies.pod_id"
+        #                 ]
+        #             }
+        #         }
+        #     },
+        #     {"$unwind": "$all_pod_ids"},
+        #     {"$group": {"_id": None, "unique_pod_ids": {"$addToSet": "$all_pod_ids"}}}
+        # ]
+        # all_pod_ids = self.db.pod_dependencies.aggregate(pipeline, allowDiskUse=True)
+        # pods_to_fetch = []
+        # for row in all_pod_ids:
+        #     # print(row)
+        #     unique_pod_ids = row.get("unique_pod_ids", [])
+        #     pods_to_fetch.extend(unique_pod_ids)
+        
+        # # print(len(set(pods_to_fetch)))
+        # # print("UNIQUE POD IDS FOUND")
+        # count = 0
+        # result = self.db.pod_storage.find({"pod_id" : {"$in": pods_to_fetch}}, {"_id" : 0}).sort({"pod_id" : 1, "chunk": 1})
+        # for row in result:
+        #     count += 1
+        #     if row["pod_id"] not in self.cache:
+        #         self.cache[row["pod_id"]] = bytearray()
+        #     self.cache[row["pod_id"]].extend(row["pod_bytes"])
+        # print(f"POD IDS FOUND {count}")
         return MongoPodStorageReader(self)
 
     def estimate_size(self) -> int:
-        stats = self.db.command("collstats", self.collection.name)
-        return stats["size"]  # Size in bytes
+        pod_storage_stats = self.db.command("collstats", self.db.pod_storage.name)
+        pod_dep_stats = self.db.command("collstats", self.db.pod_dependencies.name)
+        return pod_storage_stats["size"]  + pod_dep_stats["size"] # Size in bytes
