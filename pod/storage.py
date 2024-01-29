@@ -869,7 +869,7 @@ class RedisPodStorage(PodStorage):
             pipeline.get(key)
         results = pipeline.execute()
         for key, synonym in zip(self.redis_client.scan_iter("pod_synonyms:*"), results):
-            serialized_pod_id = key.split(b":")[1].decode()  # Assuming key format "pod_bytes:serialized_pod_id"
+            serialized_pod_id = key.split(b":")[1].decode()
             pod_id = deserialize_pod_id(serialized_pod_id)
             self.synonyms[pod_id] = deserialize_pod_id(synonym)
 
