@@ -19,7 +19,7 @@ import pandas as pd
 from dill import Pickler as BasePickler
 from dill import Unpickler as BaseUnpickler
 
-from pod.common import Object, ObjectId, PodId, TimeId, make_pod_id, object_id, step_time_id
+from pod.common import Object, ObjectId, PodDependency, PodId, TimeId, make_pod_id, next_rank, object_id, step_time_id
 from pod.storage import PodReader, PodStorage, PodWriter
 
 
@@ -194,7 +194,7 @@ class StaticPodPicklerJob:
 @dataclass
 class StaticPodPicklerContext:
     seen_oid: Set[ObjectId]
-    dependency_maps: Dict[PodId, Set[PodId]]
+    dependency_maps: Dict[PodId, PodDependency]
     memo: StaticPodPicklerMemo
 
     @staticmethod
@@ -270,7 +270,7 @@ class BaseStaticPodPickler(BasePickler):
     def __init__(self, *args, **kwargs) -> None:
         BasePickler.__init__(self, *args, **kwargs)
 
-    def get_root_deps(self) -> Set[PodId]:
+    def get_root_dep(self) -> PodDependency:
         raise NotImplementedError("Abstract method")
 
 
@@ -284,9 +284,13 @@ class FinalPodPickler(BaseStaticPodPickler):
     ) -> None:
         BaseStaticPodPickler.__init__(self, file, **pickle_kwargs)
         self.memo = ctx.memo.next_view(root_pid)
+        self.root_rank = next_rank()
 
-    def get_root_deps(self) -> Set[PodId]:
-        return self.memo.get_dep_pids()
+    def get_root_dep(self) -> PodDependency:
+        return PodDependency(
+            dep_pids=self.memo.get_dep_pids(),
+            rank=self.root_rank,
+        )
 
 
 class StaticPodPickler(BaseStaticPodPickler):
@@ -345,7 +349,8 @@ class StaticPodPickler(BaseStaticPodPickler):
         BaseStaticPodPickler.__init__(self, file, **pickle_kwargs)
         self.root_obj = root_obj
         self.root_pid = root_pid
-        self.root_deps: Set[PodId] = set()
+        self.root_dep_pids: Set[PodId] = set()
+        self.root_rank = next_rank()
         self.ctx = ctx
         self.writer = writer
         self.pickle_kwargs = pickle_kwargs
@@ -372,11 +377,14 @@ class StaticPodPickler(BaseStaticPodPickler):
         if oid not in self.ctx.seen_oid:
             self.ctx.seen_oid.add(oid)
             StaticPodPickler.dump_and_pod_write(obj, pid, self.ctx, self.writer, self.pickle_kwargs)
-        self.root_deps.add(pid)
+        self.root_dep_pids.add(pid)
         return oid
 
-    def get_root_deps(self) -> Set[PodId]:
-        return self.root_deps | self.memo.get_dep_pids()
+    def get_root_dep(self) -> PodDependency:
+        return PodDependency(
+            dep_pids=self.root_dep_pids | self.memo.get_dep_pids(),
+            rank=self.root_rank,
+        )
 
     @staticmethod
     def dump_and_pod_write(
@@ -404,7 +412,7 @@ class StaticPodPickler(BaseStaticPodPickler):
 
         # Write to pod storage.
         writer.write_pod(this_pid, this_pod_bytes)
-        ctx.dependency_maps[this_pid] = this_pickler.get_root_deps()
+        ctx.dependency_maps[this_pid] = this_pickler.get_root_dep()
 
         # pod_pickling_stat.append(this_pid, this_obj, this_pod_bytes)  # stat_staticppick
 
@@ -489,8 +497,16 @@ class StaticPodPickling(PodPickling):
                 unpickler_by_oid={},
                 memo=StaticPodUnpicklerMemo(),
             )
-            with reader.read(pid) as obj_io:
-                return StaticPodUnpickler(pid.oid, ctx, obj_io, **self.pickle_kwargs).load()
+            for this_pid in reader.dep_pids_by_rank():
+                if this_pid.oid not in ctx.loaded_objs:
+                    with reader.read(this_pid) as obj_io:
+                        ctx.loaded_objs[this_pid.oid] = StaticPodUnpickler(
+                            this_pid.oid,
+                            ctx,
+                            obj_io,
+                            **self.pickle_kwargs,
+                        ).load()
+            return ctx.loaded_objs[pid.oid]
 
     def estimate_size(self) -> int:
         return self.storage.estimate_size()
@@ -565,4 +581,4 @@ if __name__ == "__main__":
 
     # Visualize dependency graph.
     if isinstance(pod_storage, DictPodStorage):
-        plot_deps(pod_storage.dep_pids)
+        plot_deps(pod_storage.deps)
