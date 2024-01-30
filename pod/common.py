@@ -16,6 +16,14 @@ class PodId:
     def __reduce__(self):
         return self.__class__, (self.tid, self.oid)
 
+    def redis_str(self) -> str:
+        return str(self.tid) + "|" + str(self.oid)
+
+    @staticmethod
+    def from_redis_str(redis_str):
+        tid_s, oid_s = redis_str.split("|")
+        return PodId(TimeId(tid_s), ObjectId(oid_s))
+
 
 _current_tid = 0
 

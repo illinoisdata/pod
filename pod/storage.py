@@ -801,8 +801,9 @@ class PostgreSQLPodStorage(PodStorage):
 class RedisPodStorageWriter(PodWriter):
     def __init__(self, storage: RedisPodStorage) -> None:
         self.storage = storage
-        self.pod_data: Dict[bytes, bytes] = {}
-        self.dependency_map: Dict[bytes, Set[bytes]] = {}
+        self.pod_data: Dict[PodId, bytes] = {}
+        self.dependency_map: Dict[PodId, Set[str]] = {}
+        self.new_pid_synonyms: Dict[PodId, PodId] = {}
 
     def __enter__(self):
         return self
@@ -812,23 +813,30 @@ class RedisPodStorageWriter(PodWriter):
 
     def flush_data(self):
         with self.storage.redis_client.pipeline() as pipe:
-            for serialized_pod_id, bytes in self.pod_data.items():
-                pipe.set(f"pod_bytes:{serialized_pod_id}", bytes)
-                if serialized_pod_id in self.dependency_map:
-                    serialized_dep_pids = self.dependency_map[serialized_pod_id]
-                    if serialized_dep_pids:
-                        pipe.sadd(f"dep_pids:{serialized_pod_id}", *serialized_dep_pids)
+            for pod_id, bytes in self.pod_data.items():
+                pipe.set(f"pod_bytes:{pod_id.redis_str()}", bytes)
+                if pod_id in self.dependency_map:  # Assuming all pods and dependencies being written
+                    dep_pids = self.dependency_map[pod_id]
+                    if dep_pids:
+                        pipe.sadd(f"dep_pids:{pod_id.redis_str()}", *dep_pids)
+            for pod_id, syn_pid in self.new_pid_synonyms.items():
+                self.storage.synonyms[pod_id] = syn_pid
+                pipe.set(f"pod_synonyms:{pod_id.redis_str()}", syn_pid.redis_str())
             pipe.execute()
+        self.new_pid_synonyms = {}
         self.dependency_map = {}
+        self.pod_data = {}
 
     def write_pod(self, pod_id: PodId, pod_bytes: bytes) -> None:
-        serialized_pod_id = serialize_pod_id(pod_id)
-        self.pod_data[serialized_pod_id] = pod_bytes
+        if pod_bytes in self.storage.pod_bytes_memo:
+            self.new_pid_synonyms[pod_id] = self.storage.pod_bytes_memo.get(pod_bytes)
+        else:
+            self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
+            self.pod_data[pod_id] = pod_bytes
 
     def write_dep(self, pod_id: PodId, dep_pids: Set[PodId]) -> None:
-        serialized_pod_id = serialize_pod_id(pod_id)
-        serialized_dep_pids = {serialize_pod_id(pid) for pid in dep_pids}
-        self.dependency_map[serialized_pod_id] = serialized_dep_pids
+        serialized_dep_pids = {pid.redis_str() for pid in dep_pids}
+        self.dependency_map[pod_id] = serialized_dep_pids
 
 
 class RedisPodStorageReader(PodReader):
@@ -836,8 +844,8 @@ class RedisPodStorageReader(PodReader):
         self.storage = storage
 
     def read(self, pod_id: PodId) -> io.IOBase:
-        serialized_pod_id = serialize_pod_id(pod_id)
-        pod_bytes = self.storage.redis_client.get(f"pod_bytes:{serialized_pod_id!r}")
+        pod_id = self.storage.synonyms.get(pod_id, pod_id)
+        pod_bytes = self.storage.redis_client.get(f"pod_bytes:{pod_id.redis_str()}")
         pod_bytes = cast(bytes, pod_bytes)
         if pod_bytes is None:
             raise KeyError(f"Data not found for Pod ID: {pod_id}")
@@ -847,6 +855,19 @@ class RedisPodStorageReader(PodReader):
 class RedisPodStorage(PodStorage):
     def __init__(self, host: str, port: int) -> None:
         self.redis_client = redis.Redis(host=host, port=port)
+        self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
+        self.synonyms: PodIdSynonym = {}
+        self._fetch_synonyms()
+
+    def _fetch_synonyms(self):
+        pipeline = self.redis_client.pipeline()
+        for key in self.redis_client.scan_iter("pod_synonyms:*"):
+            pipeline.get(key)
+        results = pipeline.execute()
+        for key, synonym in zip(self.redis_client.scan_iter("pod_synonyms:*"), results):
+            pid_redis_str = key.split(b":")[1]
+            pod_id = PodId.from_redis_str(pid_redis_str)
+            self.synonyms[pod_id] = PodId.from_redis_str(synonym)
 
     def writer(self) -> PodWriter:
         return RedisPodStorageWriter(self)
@@ -988,7 +1009,8 @@ class Neo4jPodStorage(PodStorage):
 
 
 class MongoPodStorageWriter(PodWriter):
-    MAX_BYTES_SIZE = 15_000_000 # 15 MB
+    MAX_BYTES_SIZE = 15_000_000  # 15 MB
+
     def __init__(self, storage: MongoPodStorage) -> None:
         self.storage = storage
         self.pods: List[Tuple[PodId, bytes]] = []
@@ -1022,14 +1044,23 @@ class MongoPodStorageWriter(PodWriter):
         if not is_synonym:
             pod_bytes_memview = memoryview(pod_bytes)
             return [
-                {"pod_id": serialized_pod_id, "chunk": i, "pod_bytes": pod_bytes_memview[i: i + MongoPodStorageWriter.MAX_BYTES_SIZE].tobytes()}
-                for i in range(0, len(pod_bytes), MongoPodStorageWriter.MAX_BYTES_SIZE)]
+                {
+                    "pod_id": serialized_pod_id,
+                    "chunk": i,
+                    "pod_bytes": pod_bytes_memview[i : i + MongoPodStorageWriter.MAX_BYTES_SIZE].tobytes(),
+                }
+                for i in range(0, len(pod_bytes), MongoPodStorageWriter.MAX_BYTES_SIZE)
+            ]
         else:
             return [{"pod_id": serialized_pod_id, "synonym": self.new_pid_synonyms[serialized_pod_id]}]
 
     def construct_dependency_documents(self, serialized_pod_id: SerializedPodId):
-        deps_list = [serialize_pod_id(dep_pid) for dep_pid in self.dependency_map[serialized_pod_id] if serialized_pod_id in self.dependency_map]
-        deps = {"pod_id": serialized_pod_id, "dependencies" : deps_list}
+        deps_list = [
+            serialize_pod_id(dep_pid)
+            for dep_pid in self.dependency_map[serialized_pod_id]
+            if serialized_pod_id in self.dependency_map
+        ]
+        deps = {"pod_id": serialized_pod_id, "dependencies": deps_list}
         return deps
 
     def write_pod(
@@ -1081,13 +1112,13 @@ class MongoPodStorage(PodStorage):
         self.db = self.mongo_client.pod
         self.db.pod_storage.create_index("pod_id")
         self.db.pod_dependencies.create_index("pod_id")
-        self.cache: Dict[SerializedPodId, io.BytesIO] = {}
+        self.cache: Dict[SerializedPodId, bytearray] = {}
         self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
         self.synonyms: PodIdSynonym = {}
         self._fetch_synonyms()
 
     def _fetch_synonyms(self):
-        synonyms = self.db.pod_storage.find({ "synonym": { "$exists": True } }, {"_id" : 0})
+        synonyms = self.db.pod_storage.find({"synonym": {"$exists": True}}, {"_id": 0})
         for row in synonyms:
             self.synonyms[row["pod_id"]] = row["synonym"]
 
@@ -1111,7 +1142,7 @@ class MongoPodStorage(PodStorage):
         #         "$project": {
         #             "all_pod_ids": {
         #                 "$setUnion": [
-        #                     ["$pod_id"], 
+        #                     ["$pod_id"],
         #                     "$all_dependencies.pod_id"
         #                 ]
         #             }
@@ -1126,7 +1157,7 @@ class MongoPodStorage(PodStorage):
         #     # print(row)
         #     unique_pod_ids = row.get("unique_pod_ids", [])
         #     pods_to_fetch.extend(unique_pod_ids)
-        
+
         # # print(len(set(pods_to_fetch)))
         # # print("UNIQUE POD IDS FOUND")
         # count = 0
@@ -1142,4 +1173,4 @@ class MongoPodStorage(PodStorage):
     def estimate_size(self) -> int:
         pod_storage_stats = self.db.command("collstats", self.db.pod_storage.name)
         pod_dep_stats = self.db.command("collstats", self.db.pod_dependencies.name)
-        return pod_storage_stats["size"]  + pod_dep_stats["size"] # Size in bytes
+        return pod_storage_stats["size"] + pod_dep_stats["size"]  # Size in bytes
