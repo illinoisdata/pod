@@ -801,9 +801,9 @@ class PostgreSQLPodStorage(PodStorage):
 class RedisPodStorageWriter(PodWriter):
     def __init__(self, storage: RedisPodStorage) -> None:
         self.storage = storage
-        self.pod_data: Dict[SerializedPodId, bytes] = {}
-        self.dependency_map: Dict[SerializedPodId, Set[SerializedPodId]] = {}
-        self.new_pid_synonyms: Dict[SerializedPodId, SerializedPodId] = {}
+        self.pod_data: Dict[PodId, bytes] = {}
+        self.dependency_map: Dict[PodId, Set[str]] = {}
+        self.new_pid_synonyms: Dict[PodId, PodId] = {}
 
     def __enter__(self):
         return self
@@ -813,32 +813,30 @@ class RedisPodStorageWriter(PodWriter):
 
     def flush_data(self):
         with self.storage.redis_client.pipeline() as pipe:
-            for serialized_pod_id, bytes in self.pod_data.items():
-                pipe.set(f"pod_bytes:{serialized_pod_id}", bytes)
-                if serialized_pod_id in self.dependency_map:  # Assuming all pods and dependencies being written
-                    serialized_dep_pids = self.dependency_map[serialized_pod_id]
-                    if serialized_dep_pids:
-                        pipe.sadd(f"dep_pids:{serialized_pod_id}", *serialized_dep_pids)
-            for serialized_pod_id, serialized_syn in self.new_pid_synonyms.items():
-                self.storage.synonyms[deserialize_pod_id(serialized_pod_id)] = deserialize_pod_id(serialized_syn)
-                pipe.set(f"pod_synonyms:{serialized_pod_id}", serialized_syn)
+            for pod_id, bytes in self.pod_data.items():
+                pipe.set(f"pod_bytes:{pod_id.redis_str()}", bytes)
+                if pod_id in self.dependency_map:  # Assuming all pods and dependencies being written
+                    dep_pids = self.dependency_map[pod_id]
+                    if dep_pids:
+                        pipe.sadd(f"dep_pids:{pod_id.redis_str()}", *dep_pids)
+            for pod_id, syn_pid in self.new_pid_synonyms.items():
+                self.storage.synonyms[pod_id] = syn_pid
+                pipe.set(f"pod_synonyms:{pod_id.redis_str()}", syn_pid.redis_str())
             pipe.execute()
         self.new_pid_synonyms = {}
         self.dependency_map = {}
         self.pod_data = {}
 
     def write_pod(self, pod_id: PodId, pod_bytes: bytes) -> None:
-        serialized_pod_id = serialize_pod_id(pod_id)
         if pod_bytes in self.storage.pod_bytes_memo:
-            self.new_pid_synonyms[serialized_pod_id] = serialize_pod_id(self.storage.pod_bytes_memo.get(pod_bytes))
+            self.new_pid_synonyms[pod_id] = self.storage.pod_bytes_memo.get(pod_bytes)
         else:
             self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
-            self.pod_data[serialized_pod_id] = pod_bytes
+            self.pod_data[pod_id] = pod_bytes
 
     def write_dep(self, pod_id: PodId, dep_pids: Set[PodId]) -> None:
-        serialized_pod_id = serialize_pod_id(pod_id)
-        serialized_dep_pids = {serialize_pod_id(pid) for pid in dep_pids}
-        self.dependency_map[serialized_pod_id] = serialized_dep_pids
+        serialized_dep_pids = {pid.redis_str() for pid in dep_pids}
+        self.dependency_map[pod_id] = serialized_dep_pids
 
 
 class RedisPodStorageReader(PodReader):
@@ -846,10 +844,8 @@ class RedisPodStorageReader(PodReader):
         self.storage = storage
 
     def read(self, pod_id: PodId) -> io.IOBase:
-        if pod_id in self.storage.synonyms:
-            pod_id = self.storage.synonyms[pod_id]
-        serialized_pod_id = serialize_pod_id(pod_id)
-        pod_bytes = self.storage.redis_client.get(f"pod_bytes:{serialized_pod_id!r}")
+        pod_id = self.storage.synonyms.get(pod_id, pod_id)
+        pod_bytes = self.storage.redis_client.get(f"pod_bytes:{pod_id.redis_str()}")
         pod_bytes = cast(bytes, pod_bytes)
         if pod_bytes is None:
             raise KeyError(f"Data not found for Pod ID: {pod_id}")
@@ -869,9 +865,9 @@ class RedisPodStorage(PodStorage):
             pipeline.get(key)
         results = pipeline.execute()
         for key, synonym in zip(self.redis_client.scan_iter("pod_synonyms:*"), results):
-            serialized_pod_id = key.split(b":")[1].decode()
-            pod_id = deserialize_pod_id(serialized_pod_id)
-            self.synonyms[pod_id] = deserialize_pod_id(synonym)
+            pid_redis_str = key.split(b":")[1]
+            pod_id = PodId.from_redis_str(pid_redis_str)
+            self.synonyms[pod_id] = PodId.from_redis_str(synonym)
 
     def writer(self) -> PodWriter:
         return RedisPodStorageWriter(self)
