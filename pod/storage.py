@@ -983,8 +983,8 @@ class Neo4jPodStorage(PodStorage):
 
     def estimate_size(self) -> int:
         """Gets size of all files in used neo4j database"""
-        home_directory = os.path.expanduser("~")
-        search_pattern = os.path.join(home_directory, "neo4j-*/data/databases/neo4j")
+        home_directory = os.path.expanduser("/")
+        search_pattern = os.path.join(home_directory, "neo4j_data/data/databases/pod")
         matching_directories = glob.glob(search_pattern)
         if len(matching_directories) > 1:
             raise RuntimeError("Multiple Neo4j installations found. Please make sure only one exists in your user directory")

@@ -1,34 +1,39 @@
 FROM ubuntu:22.04
 
-RUN apt-get update
-RUN apt-get upgrade --yes
+RUN apt-get update && apt-get upgrade --yes
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install tools
-RUN apt-get install build-essential make vim tmux git htop sysstat ioping nfs-common vmtouch --yes
+RUN apt-get update && apt-get install -y build-essential make vim tmux git htop sysstat ioping nfs-common vmtouch
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Python
-RUN apt-get install python3.11 python-is-python3 python3-pip --yes
+RUN apt-get update && apt-get install -y python3.11 python-is-python3 python3-pip
 RUN python -m pip install --upgrade pip
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install PostgreSQL client
-RUN DEBIAN_FRONTEND="noninteractive" apt-get install postgresql --yes
+RUN apt-get update && DEBIAN_FRONTEND="noninteractive" apt-get install -y postgresql
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Redis client
-RUN apt-get install redis-tools --yes
+RUN apt-get update && apt-get install -y redis-tools
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Neo4j client
-RUN apt --fix-broken install && apt install openjdk-17-jre --yes
-RUN apt install wget --yes
-RUN wget https://dist.neo4j.org/cypher-shell/cypher-shell_5.15.0_all.deb?_ga=2.72547732.605979457.1705684934-272562543.1705684934 -O cypher-shell.deb && dpkg -i cypher-shell.deb && rm cypher-shell.deb
+RUN apt-get update && apt --fix-broken install && apt install -y openjdk-17-jre
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt install -y wget
+RUN wget https://dist.neo4j.org/cypher-shell/cypher-shell_5.15.0_all.deb -O cypher-shell.deb && dpkg -i cypher-shell.deb && rm cypher-shell.deb
 
 # Install MongoDB client
-RUN apt-get install gnupg --yes
-RUN wget -qO- https://www.mongodb.org/static/pgp/server-7.0.asc | tee /etc/apt/trusted.gpg.d/server-7.0.asc && \
-    echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-RUN apt-get update
-RUN apt-get install mongodb-mongosh --yes
+RUN apt-get update && apt-get install -y gnupg
+RUN wget -qO- https://www.mongodb.org/static/pgp/server-7.0.asc | tee /etc/apt/trusted.gpg.d/server-7.0.asc
+RUN echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+RUN apt-get update && apt-get install -y mongodb-mongosh
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install requirements first to improve cachings
+# Install requirements first to improve caching
 COPY ./requirements.txt /pod/requirements.txt
 RUN python -m pip install -r /pod/requirements.txt
 

@@ -72,7 +72,7 @@ function get_sut_args() {
         sut_args="--sut pod_redis --redis_hostname podredis --redis_port 6379"
     elif [[ $_SUT == "pnj" ]]
     then
-        sut_args="--sut pod_neo4j --neo4j_uri neo4j+ssc://podneo4j --neo4j_port 7687 --neo4j_password podneo4jPassword --neo4j_database pod"
+        sut_args="--sut pod_neo4j --neo4j_uri neo4j://podneo4j --neo4j_port 7687 --neo4j_password podneo4jPassword --neo4j_database pod"
     elif [[ $_SUT == "pmg" ]]
     then
         sut_args="--sut pod_mongo --mongo_hostname podmongo --mongo_port 27017"
