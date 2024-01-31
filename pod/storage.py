@@ -91,6 +91,9 @@ class PodReader:
     def read(self, pod_id: PodId) -> io.IOBase:
         raise NotImplementedError("Abstract method")
 
+    def read_meta(self, pod_id: PodId) -> bytes:
+        raise NotImplementedError("Abstract method")
+
     def dep_pids_by_rank(self) -> List[PodId]:
         raise NotImplementedError("Abstract method")
 
@@ -179,6 +182,9 @@ class DictPodStorageReader(PodReader):
 
     def read(self, pod_id: PodId) -> io.IOBase:
         return io.BytesIO(self.storage.pod_bytes[pod_id])
+
+    def read_meta(self, pod_id: PodId) -> bytes:
+        return self.storage.deps[pod_id].meta
 
     def dep_pids_by_rank(self) -> List[PodId]:
         seen_pid: Set[PodId] = set()
@@ -349,6 +355,9 @@ class FilePodStorageReader(PodReader):
             raise ValueError(f"False index pointing {pod_id} ){resolved_pid}) to {page_path}: {page}")
         # self.cache_stat.add_read(str(resolved_pid), len(page[resolved_pid]))  # stat_cache_pfl
         return io.BytesIO(page[resolved_pid])
+
+    def read_meta(self, pod_id: PodId) -> bytes:
+        return self.storage.deps[pod_id].meta
 
     def dep_pids_by_rank(self) -> List[PodId]:
         return sorted(self.expected_pids, key=self.storage.pid_rank)
