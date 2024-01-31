@@ -5,12 +5,13 @@ Pickle protocols based on correlated key-value storages.
 from __future__ import annotations  # isort:skip
 import pod.__pickle__  # noqa, isort:skip
 
+import enum
 import io
 import os
 from bisect import bisect_right
 from dataclasses import dataclass
 from types import CodeType, FunctionType, ModuleType, NoneType
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import dill as pickle
 import matplotlib.figure
@@ -60,7 +61,7 @@ class SnapshotPodPickling(PodPickling):
         return self.root_dir / f"{pid.tid}_{pid.oid}.pkl"
 
 
-""" Pickling objects into pod using type-static heuristic """
+""" Pickling objects into pod consistently on object identity """
 
 
 MemoId = int
@@ -142,9 +143,6 @@ class StaticPodPicklerMemoView:
     def get_dep_pids(self) -> Set[PodId]:
         return self.dep_pids
 
-    # def clear(self) -> None:
-    #     raise NotImplementedError("Not yet implemented")
-
 
 class StaticPodUnpicklerMemo:
     def __init__(self) -> None:
@@ -185,10 +183,73 @@ class StaticPodUnpicklerMemoView:
         return self.memo[memo_id]
 
 
-@dataclass
-class StaticPodPicklerJob:
-    obj: Object
-    is_final: bool
+class PodAction(enum.Enum):
+    bundle = "bundle"
+    split = "split"
+    split_final = "split_final"
+
+
+class ManualPodding:
+    BUNDLE_TYPES = (
+        # Constant/small size.
+        float,
+        int,
+        complex,
+        bool,
+        tuple,
+        # Common ignores.
+        NoneType,
+        type,
+    )
+    SPLIT_TYPES = (
+        # Builtin types.
+        str,
+        bytes,
+        list,
+        dict,
+        # Numerical types.
+        np.ndarray,
+        pd.DataFrame,
+        matplotlib.figure.Figure,
+        # Nested types.
+        FunctionType,
+        ModuleType,
+        CodeType,
+    )
+    FINAL_TYPES = (
+        # Builtin types.
+        str,
+        bytes,
+        # Numerical types.
+        np.ndarray,
+        pd.DataFrame,
+        matplotlib.figure.Figure,
+    )
+    SPLIT_MODULES = {
+        "sklearn",
+    }
+    FINAL_MODULES = {
+        "sklearn",
+    }
+
+    @staticmethod
+    def podding_fn(obj: Object) -> PodAction:
+        if isinstance(obj, ManualPodding.BUNDLE_TYPES):
+            return PodAction.bundle
+
+        # Extract object module.
+        obj_module = getattr(obj, "__module__", None)
+        obj_module = obj_module.split(".")[0] if isinstance(obj_module, str) else None
+        is_split = isinstance(obj, ManualPodding.SPLIT_TYPES) or obj_module in ManualPodding.SPLIT_MODULES
+        is_split_final = is_split and (isinstance(obj, ManualPodding.FINAL_TYPES) or obj_module in ManualPodding.FINAL_MODULES)
+
+        # Decide whether to split.
+        if is_split:
+            return PodAction.split
+        elif is_split_final:
+            return PodAction.split_final
+        else:
+            return PodAction.bundle
 
 
 @dataclass
@@ -196,6 +257,8 @@ class StaticPodPicklerContext:
     seen_oid: Set[ObjectId]
     dependency_maps: Dict[PodId, PodDependency]
     memo: StaticPodPicklerMemo
+    cached_pod_actions: Dict[ObjectId, PodAction]
+    podding_fn: Callable[[ObjectId], PodAction]
 
     @staticmethod
     def new(obj: Object) -> StaticPodPicklerContext:
@@ -204,6 +267,8 @@ class StaticPodPicklerContext:
             seen_oid=seen_oid,
             dependency_maps={},
             memo=StaticPodPicklerMemo(),
+            cached_pod_actions={},
+            podding_fn=ManualPodding.podding_fn,
         )
 
 
@@ -294,48 +359,15 @@ class FinalPodPickler(BaseStaticPodPickler):
 
 
 class StaticPodPickler(BaseStaticPodPickler):
-    BUNDLE_TYPES = (
-        # Constant/small size.
+    MUST_BUNDLE_TYPES = (
         float,
         int,
         complex,
         bool,
-        # Forbidden due to dill's assumption in save_function.
         tuple,
-        dict,
-        # Common ignores.
         NoneType,
         type,
     )
-    SPLIT_TYPES = (
-        # Builtin types.
-        str,
-        bytes,
-        list,
-        # Numerical types.
-        np.ndarray,
-        pd.DataFrame,
-        matplotlib.figure.Figure,
-        # Nested types.
-        FunctionType,
-        ModuleType,
-        CodeType,
-    )
-    FINAL_TYPES = (
-        # Builtin types.
-        str,
-        bytes,
-        # Numerical types.
-        np.ndarray,
-        pd.DataFrame,
-        matplotlib.figure.Figure,
-    )
-    SPLIT_MODULES = {
-        "sklearn",
-    }
-    FINAL_MODULES = {
-        "sklearn",
-    }
 
     def __init__(
         self,
@@ -359,26 +391,43 @@ class StaticPodPickler(BaseStaticPodPickler):
         self.memo = self.ctx.memo.next_view(root_pid)
 
     def persistent_id(self, obj: Object) -> Optional[ObjectId]:
-        if isinstance(obj, StaticPodPickler.BUNDLE_TYPES):
-            # TODO: Check shared reference.
-            return None
-        obj_module = getattr(obj, "__module__", None)
-        obj_module = obj_module.split(".")[0] if isinstance(obj_module, str) else None
-        if not (isinstance(obj, StaticPodPickler.SPLIT_TYPES) or obj_module in StaticPodPickler.SPLIT_MODULES):
-            # Split only allowed types and modules.
-            # print(type(obj), obj_module)
-            return None
-
-        oid = object_id(obj)
-        pid = make_pod_id(self.root_pid.tid, oid)
-        if pid == self.root_pid:
+        if obj is self.root_obj:
             # Always save root object, otherwise infinite recursion.
             return None
-        if oid not in self.ctx.seen_oid:
+
+        pod_action = self.safe_podding_fn(obj)
+        if pod_action == PodAction.bundle:
+            return None
+
+        # Split and split final.
+        oid = object_id(obj)
+        pid = make_pod_id(self.root_pid.tid, oid)
+        if oid not in self.ctx.seen_oid:  # Only dump and write this pod once.
             self.ctx.seen_oid.add(oid)
-            StaticPodPickler.dump_and_pod_write(obj, pid, self.ctx, self.writer, self.pickle_kwargs)
-        self.root_dep_pids.add(pid)
+            self.root_dep_pids.add(pid)
+            StaticPodPickler.dump_and_pod_write(
+                obj,
+                pid,
+                self.ctx,
+                self.writer,
+                is_final=(pod_action == PodAction.split_final),
+                pickle_kwargs=self.pickle_kwargs,
+            )
         return oid
+
+    def safe_podding_fn(self, obj: Object) -> PodAction:
+        # Makes podding_fn safe (consistent action per object + auto-bundle on saved object).
+        oid = id(obj)
+        if oid not in self.ctx.cached_pod_actions:
+            if isinstance(obj, StaticPodPickler.MUST_BUNDLE_TYPES):
+                # Must-bundle type, otherwise pickling fails.
+                self.ctx.cached_pod_actions[oid] = PodAction.bundle
+            elif oid in self.memo:
+                # Not yet seen by persistent_id but by memoize, this object has been saved in final pickle.
+                self.ctx.cached_pod_actions[oid] = PodAction.bundle
+            else:
+                self.ctx.cached_pod_actions[oid] = self.ctx.podding_fn(obj)
+        return self.ctx.cached_pod_actions[oid]
 
     def get_root_dep(self) -> PodDependency:
         return PodDependency(
@@ -392,13 +441,9 @@ class StaticPodPickler(BaseStaticPodPickler):
         this_pid: PodId,
         ctx: StaticPodPicklerContext,
         writer: PodWriter,
+        is_final: bool = False,
         pickle_kwargs: Dict[str, Any] = {},
     ) -> None:
-        # Determine if this object is a final type (prefer base pickler).
-        this_obj_module_str = getattr(this_obj, "__module__", None)
-        this_obj_module = this_obj_module_str.split(".")[0] if isinstance(this_obj_module_str, str) else None
-        is_final = isinstance(this_obj, StaticPodPickler.FINAL_TYPES) or this_obj_module in StaticPodPickler.FINAL_MODULES
-
         # Pickle this object into a new buffer.
         this_buffer = io.BytesIO()
         this_pickler = (
@@ -470,17 +515,25 @@ class StaticPodUnpickler(BaseUnpickler):
 
 
 class StaticPodPickling(PodPickling):
-    def __init__(self, storage: PodStorage, pickle_kwargs: Dict[str, Any] = {}) -> None:
+    def __init__(
+        self,
+        storage: PodStorage,
+        podding_fn: Optional[Callable[[Object], PodAction]] = None,
+        pickle_kwargs: Dict[str, Any] = {},
+    ) -> None:
         self.storage = storage
+        self.podding_fn = podding_fn
         self.pickle_kwargs = pickle_kwargs
 
     def dump(self, obj: Object) -> PodId:
         tid = step_time_id()
         pid = make_pod_id(tid, object_id(obj))
         ctx = StaticPodPicklerContext.new(obj)
+        if self.podding_fn is not None:
+            ctx.podding_fn = self.podding_fn
 
         with self.storage.writer() as writer:
-            StaticPodPickler.dump_and_pod_write(obj, pid, ctx, writer, self.pickle_kwargs)
+            StaticPodPickler.dump_and_pod_write(obj, pid, ctx, writer, pickle_kwargs=self.pickle_kwargs)
             for pod_id, deps in ctx.dependency_maps.items():
                 writer.write_dep(pod_id, deps)
                 # pod_pickling_stat.fill_dep(pod_id, ctx.dependency_maps)  # stat_staticppick
