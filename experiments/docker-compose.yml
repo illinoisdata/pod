@@ -7,6 +7,7 @@ services:
     stdin_open: true
     volumes:
       - ${PWD}:/pod
+      - neo4j_data:/neo4j_data/data
     working_dir: /pod
     command: ["/bin/bash"]
 
@@ -40,6 +41,8 @@ services:
     environment:
       NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"  # Using Neo4j Developer License (https://neo4j.com/licensing/)
       NEO4J_AUTH: neo4j/podneo4jPassword
+      NEO4J_server_memory_pagecache_size: 2G
+      NEO4J_server_memory_heap_max__size: 2G
     command: ["neo4j"]
 
   podmongo:
