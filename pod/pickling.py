@@ -7,12 +7,10 @@ import pod.__pickle__  # noqa, isort:skip
 
 import enum
 import io
-import os
 from bisect import bisect_right
 from dataclasses import dataclass
 from types import CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
-
 
 import dill as pickle
 import matplotlib.figure
@@ -25,7 +23,6 @@ from loguru import logger
 from pod.common import Object, ObjectId, PodDependency, PodId, TimeId, make_pod_id, next_rank, object_id, step_time_id
 from pod.feature import __FEATURE__
 from pod.storage import PodReader, PodStorage, PodWriter
-
 
 try:
     from types import NoneType
@@ -111,20 +108,58 @@ class SnapshotPodPickling(PodPickling):
 MemoId = int
 
 
-class StaticPodPicklerMemo:
+class MemoPageAllocator:
     VIRTUAL_OFFSET = 2**31  # [VIRTUAL_OFFSET, 2 ** 32) virtually points to global memo indices.
     PAGE_SIZE = 2**10  # Number of memo objects per page.
 
     def __init__(self) -> None:
-        self.physical_memo: Dict[ObjectId, Tuple[MemoId, Object]] = {}
-        self.page_pid: Dict[MemoId, PodId] = {}
+        self.oid_pages: Dict[ObjectId, List[MemoId]] = {}
+        self.oid_latest_idxs: Dict[ObjectId, int] = {}
         self.latest_page_offset: MemoId = 0
 
-    def next_page_offset(self, pid: PodId) -> MemoId:  # Next ID.
+    def allocate(self, pid: PodId) -> MemoId:
+        oid = pid.oid
+        if oid not in self.oid_latest_idxs:
+            self.oid_pages[oid] = []
+            self.oid_latest_idxs[oid] = 0
+
+        # Allocate new page if needed.
+        while self.oid_latest_idxs[oid] >= len(self.oid_pages[oid]):
+            page_offset = self._allocate()
+            self.oid_pages[oid].append(page_offset)
+
+        # Return and register new pid.
+        page_offset = self.oid_pages[oid][self.oid_latest_idxs[oid]]
+        self.oid_latest_idxs[oid] += 1
+        return page_offset
+
+    def reset(self):
+        for oid in self.oid_latest_idxs:
+            self.oid_latest_idxs[oid] = 0
+
+    def clear(self):
+        self.oid_pages = {}
+        self.oid_latest_idxs = {}
+        self.latest_page_offset = 0
+
+    def _allocate(self) -> MemoId:
         page_offset = self.latest_page_offset
-        self.latest_page_offset += StaticPodPicklerMemo.PAGE_SIZE
+        self.latest_page_offset += MemoPageAllocator.PAGE_SIZE
+        assert page_offset < MemoPageAllocator.VIRTUAL_OFFSET
+        return page_offset
+
+
+class StaticPodPicklerMemo:
+    PAGE_ALLOCATOR = MemoPageAllocator()
+
+    def __init__(self) -> None:
+        self.physical_memo: Dict[ObjectId, Tuple[MemoId, Object]] = {}
+        self.page_pid: Dict[MemoId, PodId] = {}
+        StaticPodPicklerMemo.PAGE_ALLOCATOR.reset()
+
+    def next_page_offset(self, pid: PodId) -> MemoId:  # Next ID.
+        page_offset = StaticPodPicklerMemo.PAGE_ALLOCATOR.allocate(pid)
         self.page_pid[page_offset] = pid
-        assert page_offset < StaticPodPicklerMemo.VIRTUAL_OFFSET
         return page_offset
 
     def __setitem__(self, obj_id: ObjectId, val: Tuple[MemoId, Object]) -> None:
@@ -132,7 +167,7 @@ class StaticPodPicklerMemo:
 
     def __getitem__(self, obj_id: ObjectId) -> Tuple[MemoId, Object, PodId]:
         memo_id, obj = self.physical_memo[obj_id]
-        return memo_id, obj, self.page_pid[memo_id - memo_id % StaticPodPicklerMemo.PAGE_SIZE]
+        return memo_id, obj, self.page_pid[memo_id - memo_id % MemoPageAllocator.PAGE_SIZE]
 
     def __contains__(self, obj_id: ObjectId) -> bool:
         return obj_id in self.physical_memo
@@ -159,8 +194,8 @@ class StaticPodPicklerMemoView:
 
     def __setitem__(self, obj_id: ObjectId, val: Tuple[MemoId, Object]) -> None:
         assert val[0] == self.next_id
-        page_idx = val[0] // StaticPodPicklerMemo.PAGE_SIZE
-        local_offset = val[0] % StaticPodPicklerMemo.PAGE_SIZE
+        page_idx = val[0] // MemoPageAllocator.PAGE_SIZE
+        local_offset = val[0] % MemoPageAllocator.PAGE_SIZE
         if page_idx >= len(self.page_offsets):
             self.page_offsets.append(self.memo.next_page_offset(self.pid))
         self.memo[obj_id] = (local_offset + self.page_offsets[page_idx], val[1])
@@ -169,12 +204,12 @@ class StaticPodPicklerMemoView:
     def __getitem__(self, obj_id: ObjectId) -> Tuple[MemoId, Object]:
         memo_id, obj, dep_pid = self.memo[obj_id]
         page_idx = bisect_right(self.page_offsets, memo_id) - 1
-        if page_idx >= 0 and memo_id < self.page_offsets[page_idx] + StaticPodPicklerMemo.PAGE_SIZE:
+        if page_idx >= 0 and memo_id < self.page_offsets[page_idx] + MemoPageAllocator.PAGE_SIZE:
             # Implicit: self.page_offsets[page_idx] <= memo_id.
             assert self.next_id > 0
-            memo_id = (memo_id - self.page_offsets[page_idx]) + page_idx * StaticPodPicklerMemo.PAGE_SIZE
+            memo_id = (memo_id - self.page_offsets[page_idx]) + page_idx * MemoPageAllocator.PAGE_SIZE
         else:
-            memo_id += StaticPodPicklerMemo.VIRTUAL_OFFSET
+            memo_id += MemoPageAllocator.VIRTUAL_OFFSET
             self.dep_pids.add(dep_pid)
         return (memo_id, obj)
 
@@ -213,17 +248,17 @@ class StaticPodUnpicklerMemoView:
 
     def __setitem__(self, memo_id: MemoId, obj: Object) -> None:
         assert memo_id == self.next_id
-        page_idx = memo_id // StaticPodPicklerMemo.PAGE_SIZE
-        memo_id = memo_id % StaticPodPicklerMemo.PAGE_SIZE + self.page_offsets[page_idx]
+        page_idx = memo_id // MemoPageAllocator.PAGE_SIZE
+        memo_id = memo_id % MemoPageAllocator.PAGE_SIZE + self.page_offsets[page_idx]
         self.memo[memo_id] = obj
         self.next_id += 1
 
     def __getitem__(self, memo_id: MemoId) -> Object:
-        if memo_id < StaticPodPicklerMemo.VIRTUAL_OFFSET:
-            page_idx = memo_id // StaticPodPicklerMemo.PAGE_SIZE
-            memo_id = memo_id % StaticPodPicklerMemo.PAGE_SIZE + self.page_offsets[page_idx]
+        if memo_id < MemoPageAllocator.VIRTUAL_OFFSET:
+            page_idx = memo_id // MemoPageAllocator.PAGE_SIZE
+            memo_id = memo_id % MemoPageAllocator.PAGE_SIZE + self.page_offsets[page_idx]
         else:
-            memo_id -= StaticPodPicklerMemo.VIRTUAL_OFFSET
+            memo_id -= MemoPageAllocator.VIRTUAL_OFFSET
         return self.memo[memo_id]
 
 
@@ -341,36 +376,33 @@ class StaticPodPicklingMetadata:
             memo_page_offsets=pickler.memo.page_offsets,
         )
 
-    def write(self, buffer: io.IOBase) -> None:
-        # Pre-tail segment contains array of data.
-        for page_offset in self.memo_page_offsets:
-            buffer.write(page_offset.to_bytes(StaticPodPicklingMetadata.MEMO_PAGE_OFFSET_BYTES, byteorder="big"))
+    def dumps(self) -> bytes:
+        buffer = io.BytesIO()
 
-        # Tail contains fixed-size data.
+        # Head contains fixed-size data.
         buffer.write(self.root_memo_id.to_bytes(StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES, byteorder="big"))
         buffer.write(len(self.memo_page_offsets).to_bytes(StaticPodPicklingMetadata.MEMO_PAGES_BYTES, byteorder="big"))
 
-    @staticmethod
-    def read_from(buffer: io.IOBase) -> StaticPodPicklingMetadata:
-        # Save original position to rewind to.
-        orig_pos = buffer.tell()
+        # Next segment contains array of data.
+        for page_offset in self.memo_page_offsets:
+            buffer.write(page_offset.to_bytes(StaticPodPicklingMetadata.MEMO_PAGE_OFFSET_BYTES, byteorder="big"))
 
-        # Read tail segment.
-        tail_bytes = StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES + StaticPodPicklingMetadata.MEMO_PAGES_BYTES
-        buffer.seek(-tail_bytes, os.SEEK_END)
+        return buffer.getvalue()
+
+    @staticmethod
+    def loads(pickled_self: bytes) -> StaticPodPicklingMetadata:
+        buffer = io.BytesIO(pickled_self)
+
+        # Read head segment.
         root_memo_id = int.from_bytes(buffer.read(StaticPodPicklingMetadata.ROOT_MEMO_ID_BYTES), byteorder="big")
         memo_pages = int.from_bytes(buffer.read(StaticPodPicklingMetadata.MEMO_PAGES_BYTES), byteorder="big")
 
-        # Now, read pre-tail segment
-        pretail_bytes = tail_bytes + memo_pages * StaticPodPicklingMetadata.MEMO_PAGE_OFFSET_BYTES
-        buffer.seek(-pretail_bytes, os.SEEK_END)
+        # Now, read next segment with array of data.
         memo_page_offsets = [
             int.from_bytes(buffer.read(StaticPodPicklingMetadata.MEMO_PAGE_OFFSET_BYTES), byteorder="big")
             for _ in range(memo_pages)
         ]
 
-        # Rewind back to original position.
-        buffer.seek(orig_pos, os.SEEK_SET)
         return StaticPodPicklingMetadata(
             root_memo_id=root_memo_id,
             memo_page_offsets=memo_page_offsets,
@@ -392,12 +424,14 @@ class BaseStaticPodPickler(BasePickler):
 class FinalPodPickler(BaseStaticPodPickler):
     def __init__(
         self,
+        root_obj: Object,
         root_pid: PodId,
         ctx: StaticPodPicklerContext,
         file: io.IOBase,
         pickle_kwargs: Dict[str, Any] = {},
     ) -> None:
         BaseStaticPodPickler.__init__(self, file, **pickle_kwargs)
+        self.root_obj = root_obj
         self.root_pid = root_pid
         self.memo = ctx.memo.next_view(root_pid)
         self.root_rank = next_rank()
@@ -410,6 +444,7 @@ class FinalPodPickler(BaseStaticPodPickler):
         return PodDependency(
             dep_pids=self.memo.get_dep_pids(),
             rank=self.root_rank,
+            meta=bytes(),
         )
 
 
@@ -493,6 +528,7 @@ class StaticPodPickler(BaseStaticPodPickler):
         return PodDependency(
             dep_pids=self.root_dep_pids | self.memo.get_dep_pids(),
             rank=self.root_rank,
+            meta=bytes(),
         )
 
     @staticmethod
@@ -510,23 +546,22 @@ class StaticPodPickler(BaseStaticPodPickler):
         # Pickle this object into a new buffer.
         this_buffer = io.BytesIO()
         this_pickler = (
-            FinalPodPickler(this_pid, ctx, this_buffer, **pickle_kwargs)
+            FinalPodPickler(this_obj, this_pid, ctx, this_buffer, **pickle_kwargs)
             if is_final
             else StaticPodPickler(this_obj, this_pid, ctx, writer, this_buffer, pickle_kwargs)
         )
         this_pickler.dump(this_obj)
+        this_pod_bytes = this_buffer.getvalue()
 
         # Add in metadata.
+        this_dep = this_pickler.get_root_dep()
         this_metadata = StaticPodPicklingMetadata.new(obj=this_obj, pickler=this_pickler)
-        this_metadata.write(this_buffer)
-
-        # Get the complete pod bytes.
-        this_pod_bytes = this_buffer.getvalue()
+        this_dep.meta = this_metadata.dumps()
 
         # Write to pod storage.
         __FEATURE__.new_pod(this_pid, this_pod_bytes)
         writer.write_pod(this_pid, this_pod_bytes)
-        ctx.dependency_maps[this_pid] = this_pickler.get_root_dep()
+        ctx.dependency_maps[this_pid] = this_dep
 
         assert (
             this_metadata.root_memo_id != 2**32 or len(ctx.dependency_maps[this_pid].dep_pids) == 0
@@ -558,7 +593,7 @@ class StaticPodUnpickler(BaseUnpickler):
         self.ctx = ctx
         self.args = args
         self.kwargs = kwargs
-        self.meta = StaticPodPicklingMetadata.read_from(file)
+        self.meta = StaticPodPicklingMetadata.loads(self.ctx.reader.read_meta(make_pod_id(self.ctx.tid, root_oid)))
 
         # Register myself into unpickler by oid.
         self.ctx.unpickler_by_oid[self.root_oid] = self

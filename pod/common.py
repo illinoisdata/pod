@@ -58,9 +58,10 @@ def make_pod_id(tid: TimeId, oid: ObjectId) -> PodId:
 class PodDependency:
     dep_pids: Set[PodId]  # List of pids this pod depends on.
     rank: Rank  # Rank of the pod for sorting.
+    meta: bytes  # Serialized metadata.
 
     def __reduce__(self):
-        return self.__class__, (self.dep_pids, self.rank)
+        return self.__class__, (self.dep_pids, self.rank, self.meta)
 
 
 def plot_deps(deps: Dict[PodId, PodDependency]):
