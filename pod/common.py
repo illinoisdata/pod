@@ -59,6 +59,9 @@ class PodDependency:
     dep_pids: Set[PodId]  # List of pids this pod depends on.
     rank: Rank  # Rank of the pod for sorting.
 
+    def __reduce__(self):
+        return self.__class__, (self.dep_pids, self.rank)
+
 
 def plot_deps(deps: Dict[PodId, PodDependency]):
     ps = graphviz.Digraph()

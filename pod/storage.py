@@ -86,6 +86,7 @@ class PodStorage:
 @dataclass
 class PodBytesMemo:
     max_size: int
+    min_size: int
     size: int
     memo_page: Dict[bytes, PodId]
 
@@ -93,6 +94,7 @@ class PodBytesMemo:
     def new(max_size: int) -> PodBytesMemo:
         return PodBytesMemo(
             max_size=max_size,
+            min_size=128,
             size=0,
             memo_page={},
         )
@@ -104,7 +106,7 @@ class PodBytesMemo:
         return self.memo_page[pod_bytes]
 
     def put(self, pod_bytes: bytes, pod_id: PodId):
-        if len(pod_bytes) > self.max_size or pod_bytes in self:
+        if len(pod_bytes) < self.min_size or len(pod_bytes) > self.max_size or pod_bytes in self:
             return
         self.memo_page[pod_bytes] = pod_id
         self.size += len(pod_bytes)
@@ -202,6 +204,9 @@ class FilePodStorageStats:
     pid_synonym_page_count: int
 
 
+# max_tid_diff: int = 0  # stat_max_tid_diff
+
+
 class FilePodStorageWriter(PodWriter):
     FLUSH_SIZE = 1_000_000  # 1 MB
 
@@ -222,6 +227,10 @@ class FilePodStorageWriter(PodWriter):
             # Save as synonymous pids.
             same_pod_id = self.storage.pod_bytes_memo.get(pod_bytes)
             self.new_pid_synonyms[pod_id] = same_pod_id
+            # global max_tid_diff  # stat_max_tid_diff
+            # if max_tid_diff < pod_id.tid - same_pod_id.tid:  # stat_max_tid_diff
+            #     max_tid_diff = pod_id.tid - same_pod_id.tid  # stat_max_tid_diff
+            #     print(max_tid_diff, pod_id, same_pod_id, len(pod_bytes))  # stat_max_tid_diff
         else:
             # New pod bytes.
             self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
