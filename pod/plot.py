@@ -145,10 +145,10 @@ def plot_exp1batch(argv: List[str]) -> None:
         logger.info(f"{single.name}")
 
         # Read all results.
-        all_results = {result_path.name: ExpStat.load(result_path) for result_path in single.result_paths}
+        all_results = [(result_path.name, ExpStat.load(result_path)) for result_path in single.result_paths]
 
         # Print summary..
-        for expname, result in all_results.items():
+        for expname, result in all_results:
             logger.info(f"{expname}")
             result.summary()
 
@@ -158,7 +158,7 @@ def plot_exp1batch(argv: List[str]) -> None:
         load_times: List[List[float]] = []
         dump_final_storage_gb: List[float] = []
         dump_storage_inc_gb: List[List[float]] = []
-        for expname, result in all_results.items():
+        for expname, result in all_results:
             labels.append(expname)
             dump_times.append([stat.time_s for stat in result.dumps])
             load_times.append([stat.time_s for stat in result.loads])

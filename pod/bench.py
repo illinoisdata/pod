@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import random
 import signal
 import sys
@@ -38,10 +39,10 @@ class BenchArgs:
     seed: int = 123  # Seed for randomization.
 
     """ Exp1: dumps and loads """
-    exp1_num_loads: int = 10  # Number of loads to test.
+    exp1_num_loads: int = 100  # Number of loads to test.
 
     """ Random mutating list """
-    rmlist_num_cells: int = 5  # Number of cells.
+    rmlist_num_cells: int = 10  # Number of cells.
     rmlist_list_size: int = 1000  # Number of elements in the list
     rmlist_elem_size: int = 100000  # Size of each element in the list.
     rmlist_num_elem_mutate: int = 10  # Number of elements mutating in each cell.
@@ -254,6 +255,9 @@ def run_exp1(argv: List[str]) -> None:
             time_s=dump_stop_ts - dump_start_ts,
             storage_b=sut.estimate_size(),
         )
+
+        # Reset environment to reduce noise.
+        gc.collect()
     logger.info(f"Collected pids {pids}")
 
     # Save partial results (in case of load failure).
@@ -266,7 +270,7 @@ def run_exp1(argv: List[str]) -> None:
         load_start_ts = time.time()
         try:
             with BlockTimeout(60):
-                _ = sut.load(pids[idx])
+                the_locals = sut.load(pids[idx])
         except TimeoutError as e:
             logger.warning(f"{e}")
         load_stop_ts = time.time()
@@ -276,6 +280,10 @@ def run_exp1(argv: List[str]) -> None:
             nth=nth,
             time_s=load_stop_ts - load_start_ts,
         )
+
+        # Reset environment to reduce noise.
+        del the_locals
+        gc.collect()
     expstat.summary()
 
     # Write results
