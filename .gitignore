@@ -134,3 +134,4 @@ dmypy.json
 # Pod specifics.
 nbdata/
 tmp/
+*result/
