@@ -22,7 +22,7 @@ from dataclasses_json import dataclass_json
 from loguru import logger
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
-from pod.common import PodDependency, PodId, make_pod_id
+from pod.common import PodId, PodDependency, make_pod_id
 
 POD_CACHE_SIZE = 2_000_000_000
 
@@ -50,8 +50,8 @@ class PodWriter:
     def write_dep(
         self,
         pod_id: PodId,
-        dep: PodDependency,
-    ):
+        dep_pids: Set[PodId],  # List of pids this pod depends on.
+    ) -> None:
         raise NotImplementedError("Abstract method")
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -63,9 +63,6 @@ class PodReader:
         return self  # Optional: Allocate resources.
 
     def read(self, pod_id: PodId) -> io.IOBase:
-        raise NotImplementedError("Abstract method")
-
-    def dep_pids_by_rank(self) -> List[PodId]:
         raise NotImplementedError("Abstract method")
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -86,7 +83,6 @@ class PodStorage:
 @dataclass
 class PodBytesMemo:
     max_size: int
-    min_size: int
     size: int
     memo_page: Dict[bytes, PodId]
 
@@ -94,7 +90,6 @@ class PodBytesMemo:
     def new(max_size: int) -> PodBytesMemo:
         return PodBytesMemo(
             max_size=max_size,
-            min_size=128,
             size=0,
             memo_page={},
         )
@@ -106,7 +101,7 @@ class PodBytesMemo:
         return self.memo_page[pod_bytes]
 
     def put(self, pod_bytes: bytes, pod_id: PodId):
-        if len(pod_bytes) < self.min_size or len(pod_bytes) > self.max_size or pod_bytes in self:
+        if len(pod_bytes) > self.max_size or pod_bytes in self:
             return
         self.memo_page[pod_bytes] = pod_id
         self.size += len(pod_bytes)
@@ -138,49 +133,34 @@ class DictPodStorageWriter(PodWriter):
     def write_dep(
         self,
         pod_id: PodId,
-        dep: PodDependency,
+        dep_pids: Set[PodId],  # List of pids this pod depends on.
     ) -> None:
-        self.storage.deps[pod_id] = dep
+        self.storage.dep_pids[pod_id] = dep_pids
 
 
 class DictPodStorageReader(PodReader):
-    def __init__(self, storage: DictPodStorage, hint_pod_ids: List[PodId]) -> None:
+    def __init__(self, storage: DictPodStorage) -> None:
         self.storage = storage
-        self.hint_pod_ids = hint_pod_ids
 
     def read(self, pod_id: PodId) -> io.IOBase:
         return io.BytesIO(self.storage.pod_bytes[pod_id])
-
-    def dep_pids_by_rank(self) -> List[PodId]:
-        seen_pid: Set[PodId] = set()
-        pid_queue: Queue[PodId] = Queue()
-        for pid in self.hint_pod_ids:
-            seen_pid.add(pid)
-            pid_queue.put(pid)
-        while not pid_queue.empty():
-            pid = pid_queue.get()
-            for dep_pid in self.storage.deps[pid].dep_pids:
-                if dep_pid not in seen_pid:
-                    seen_pid.add(dep_pid)
-                    pid_queue.put(dep_pid)
-        return sorted(seen_pid, key=lambda pid: self.storage.deps[pid].rank)
 
 
 class DictPodStorage(PodStorage):
     def __init__(self) -> None:
         self.pod_bytes: Dict[PodId, bytes] = {}
-        self.deps: Dict[PodId, PodDependency] = {}
+        self.dep_pids: Dict[PodId, Set[PodId]] = {}
 
     def writer(self) -> PodWriter:
         return DictPodStorageWriter(self)
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
-        return DictPodStorageReader(self, hint_pod_ids)
+        return DictPodStorageReader(self)
 
     def estimate_size(self) -> int:
         # In memory size
         # import sys
-        # return sys.getsizeof(self.pod_bytes) + sys.getsizeof(self.deps)
+        # return sys.getsizeof(self.pod_bytes) + sys.getsizeof(self.dep_pids)
 
         # Only bytes
         return sum(len(pod_bytes) for _, pod_bytes in self.pod_bytes.items())
@@ -190,7 +170,7 @@ class DictPodStorage(PodStorage):
 
 
 FilePodStorageIndex = Dict[PodId, int]
-FilePodStoragePodIdDep = Dict[PodId, PodDependency]
+FilePodStoragePodIdDep = Dict[PodId, Set[PodId]]
 FilePodStoragePodPage = Dict[PodId, bytes]
 FilePodStorageDepPage = FilePodStoragePodIdDep
 
@@ -202,9 +182,6 @@ class FilePodStorageStats:
     dep_page_count: int
     pid_index_page_count: int
     pid_synonym_page_count: int
-
-
-# max_tid_diff: int = 0  # stat_max_tid_diff
 
 
 class FilePodStorageWriter(PodWriter):
@@ -227,10 +204,6 @@ class FilePodStorageWriter(PodWriter):
             # Save as synonymous pids.
             same_pod_id = self.storage.pod_bytes_memo.get(pod_bytes)
             self.new_pid_synonyms[pod_id] = same_pod_id
-            # global max_tid_diff  # stat_max_tid_diff
-            # if max_tid_diff < pod_id.tid - same_pod_id.tid:  # stat_max_tid_diff
-            #     max_tid_diff = pod_id.tid - same_pod_id.tid  # stat_max_tid_diff
-            #     print(max_tid_diff, pod_id, same_pod_id, len(pod_bytes))  # stat_max_tid_diff
         else:
             # New pod bytes.
             self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
@@ -244,9 +217,9 @@ class FilePodStorageWriter(PodWriter):
     def write_dep(
         self,
         pod_id: PodId,
-        dep: PodDependency,
+        dep_pids: Set[PodId],  # List of pids this pod depends on.
     ) -> None:
-        self.dep_page_buffer[pod_id] = dep
+        self.dep_page_buffer[pod_id] = dep_pids
 
     def flush_pod(self) -> None:
         # Write buffer.
@@ -268,7 +241,7 @@ class FilePodStorageWriter(PodWriter):
             pickle.dump(self.dep_page_buffer, f)
 
         # Save to in-memory storage.
-        self.storage.deps.update(self.dep_page_buffer)
+        self.storage.pid_deps.update(self.dep_page_buffer)
 
         # Reset buffer state.
         self.dep_page_buffer = {}
@@ -285,12 +258,11 @@ class FilePodStorageWriter(PodWriter):
 
 
 class FilePodStorageReader(PodReader):
-    def __init__(self, storage: FilePodStorage, expected_pids: Set[PodId], page_idxs: Set[int]) -> None:
+    def __init__(self, storage: FilePodStorage, page_idxs: Set[int]) -> None:
         # from pod.stats import PodCacheStat  # stat_cache_pfl
         # self.cache_stat = PodCacheStat()  # stat_cache_pfl
 
         self.storage = storage
-        self.expected_pids = expected_pids
         self.page_cache: Dict[int, FilePodStoragePodPage] = {}
         for page_idx in page_idxs:
             with open(self.storage.pod_page_path(page_idx), "rb") as f:
@@ -304,7 +276,6 @@ class FilePodStorageReader(PodReader):
         page_idx = self.storage.search_index(resolved_pid)
         page_path = self.storage.pod_page_path(page_idx)
         if page_idx not in self.page_cache:
-            logger.warning(f"Unexpected cache miss on {pod_id} (={resolved_pid}), page_idx= {page_path}")
             with open(page_path, "rb") as f:
                 self.page_cache[page_idx] = pickle.load(f)
                 # self.cache_stat.add_io(  # stat_cache_pfl
@@ -315,9 +286,6 @@ class FilePodStorageReader(PodReader):
             raise ValueError(f"False index pointing {pod_id} ){resolved_pid}) to {page_path}: {page}")
         # self.cache_stat.add_read(str(resolved_pid), len(page[resolved_pid]))  # stat_cache_pfl
         return io.BytesIO(page[resolved_pid])
-
-    def dep_pids_by_rank(self) -> List[PodId]:
-        return sorted(self.expected_pids, key=self.storage.pid_rank)
 
     # def __del__(self) -> None:  # stat_cache_pfl
     #     self.cache_stat.summary()  # stat_cache_pfl
@@ -337,13 +305,13 @@ class FilePodStorage(PodStorage):
         self.pid_index: FilePodStorageIndex = {}
         self.pid_synonym: PodIdSynonym = {}
         self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
-        self.deps: FilePodStoragePodIdDep = {}
+        self.pid_deps: FilePodStoragePodIdDep = {}
         if self.is_init():
             self.stats = self.reload_stats()
             self.pid_index = self.reload_index()
             self.pid_synonym = self.reload_pid_synonym()
             self.reload_pod_bytes_memo()
-            self.deps = self.reload_pid_deps()
+            self.pid_deps = self.reload_pid_deps()
 
     def writer(self) -> PodWriter:
         return FilePodStorageWriter(self)
@@ -360,11 +328,11 @@ class FilePodStorage(PodStorage):
             resolved_pid = self.resolve_pid_synonym(pid)
             page_idx = self.search_index(resolved_pid)
             page_idxs.add(page_idx)
-            for dep_pid in self.deps[pid].dep_pids:
+            for dep_pid in self.pid_deps[pid]:
                 if dep_pid not in seen_pid:
                     seen_pid.add(dep_pid)
                     pid_queue.put(dep_pid)
-        return FilePodStorageReader(self, seen_pid, page_idxs)
+        return FilePodStorageReader(self, page_idxs)
 
     def estimate_size(self) -> int:
         return sum(f.stat().st_size for f in self.root_dir.glob("**/*") if f.is_file())
@@ -446,9 +414,6 @@ class FilePodStorage(PodStorage):
         page_idx = self.next_pid_synonym_page_idx()
         with open(self.pid_synonym_path(page_idx), "wb") as f:
             pickle.dump(pid_synonym, f)
-
-    def pid_rank(self, pid: PodId) -> int:
-        return self.deps[pid].rank
 
     def reload_pid_synonym(self) -> PodIdSynonym:
         pid_synonym: PodIdSynonym = {}
@@ -726,15 +691,14 @@ class PostgreSQLPodStorageWriter(PodWriter):
     def write_dep(
         self,
         pod_id: PodId,
-        dep: PodDependency,
+        dep_pids: Set[PodId],  # List of pids this pod depends on.
     ) -> None:
-        self.dependency_buffer += [(pod_id.tid, pod_id.oid, p.tid, p.oid) for p in dep.dep_pids]
+        self.dependency_buffer += [(pod_id.tid, pod_id.oid, p.tid, p.oid) for p in dep_pids]
 
 
 class PostgreSQLPodStorageReader(PodReader):
-    def __init__(self, storage: PostgreSQLPodStorage, hint_pod_ids: List[PodId]) -> None:
+    def __init__(self, storage: PostgreSQLPodStorage) -> None:
         self.storage = storage
-        self.hint_pod_ids = hint_pod_ids
 
     def read(self, pod_id: PodId) -> io.IOBase:
         if pod_id in self.storage.synonyms:
@@ -752,10 +716,6 @@ class PostgreSQLPodStorageReader(PodReader):
                 for item in result:
                     self.storage.cache[(pod_id.tid, pod_id.oid)].extend(item[0])
         return io.BytesIO(self.storage.cache[(pod_id.tid, pod_id.oid)])
-
-    def dep_pids_by_rank(self) -> List[PodId]:
-        logger.warning(f"Need to implement {type(self).__name__}::dep_pids_by_rank")
-        return self.hint_pod_ids
 
 
 class PostgreSQLPodStorage(PodStorage):
@@ -964,11 +924,12 @@ class PostgreSQLPodStorage(PodStorage):
         return PostgreSQLPodStorageWriter(self)
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
-        if len(hint_pod_ids) > 0:
-            hint_tid_oid_array = [(p.tid, p.oid) for p in hint_pod_ids]
-            with self.db_conn.cursor() as cursor:
-                self._prefetch_dependencies(cursor, hint_tid_oid_array)
-        return PostgreSQLPodStorageReader(self, hint_pod_ids)
+        if len(hint_pod_ids) == 0:
+            return PostgreSQLPodStorageReader(self)
+        hint_tid_oid_array = [(p.tid, p.oid) for p in hint_pod_ids]
+        with self.db_conn.cursor() as cursor:
+            self._prefetch_dependencies(cursor, hint_tid_oid_array)
+        return PostgreSQLPodStorageReader(self)
 
     def estimate_size(self) -> int:
         with self.db_conn.cursor() as cursor:
@@ -1022,11 +983,12 @@ class RedisPodStorageWriter(PodWriter):
         self.ranks = {}
 
     def write_pod(self, pod_id: PodId, pod_bytes: bytes) -> None:
+        serialized_pod_id = serialize_pod_id(pod_id)
         if pod_bytes in self.storage.pod_bytes_memo:
-            self.new_pid_synonyms[pod_id] = self.storage.pod_bytes_memo.get(pod_bytes)
+            self.new_pid_synonyms[serialized_pod_id] = serialize_pod_id(self.storage.pod_bytes_memo.get(pod_bytes))
         else:
             self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
-            self.pod_data[pod_id] = pod_bytes
+            self.pod_data[serialized_pod_id] = pod_bytes
 
     def write_dep(
         self,
@@ -1160,13 +1122,9 @@ class Neo4jPodStorageWriter(PodWriter):
         serialized_pod_id = serialize_pod_id(pod_id)
         self.pod_data.append((serialized_pod_id, pod_bytes))
 
-    def write_dep(
-        self,
-        pod_id: PodId,
-        dep: PodDependency,
-    ) -> None:
+    def write_dep(self, pod_id: PodId, dep_pids: Set[PodId]) -> None:
         serialized_pod_id = serialize_pod_id(pod_id)
-        new_deps = [(serialized_pod_id, serialize_pod_id(dep)) for dep in dep.dep_pids]
+        new_deps = [(serialized_pod_id, serialize_pod_id(dep)) for dep in dep_pids]
         self.dependencies += new_deps
 
 
@@ -1174,7 +1132,6 @@ class Neo4jPodStorageReader(PodReader):
     def __init__(self, storage: Neo4jPodStorage, hint_pod_ids: List[PodId], cache: Dict[bytes, bytes]) -> None:
         self.storage = storage
         self.hint_pod_ids = hint_pod_ids
-        self.cache = cache
 
     def read(self, pod_id: PodId) -> io.IOBase:
         serialized_pod_id = serialize_pod_id(pod_id)
@@ -1189,10 +1146,6 @@ class Neo4jPodStorageReader(PodReader):
         pod_bytes = record["p.pod_bytes"]
         pod_bytes = cast(bytes, pod_bytes)
         return io.BytesIO(pod_bytes)
-
-    def dep_pids_by_rank(self) -> List[PodId]:
-        logger.warning(f"Need to implement {type(self).__name__}::dep_pids_by_rank")
-        return self.hint_pod_ids
 
 
 class Neo4jPodStorage(PodStorage):
@@ -1229,11 +1182,12 @@ class Neo4jPodStorage(PodStorage):
                 if pod_bytes:
                     cache[pid] = pod_bytes
 
-        return Neo4jPodStorageReader(self, hint_pod_ids, cache)
+        return Neo4jPodStorageReader(self, hint_pod_ids)
 
     def estimate_size(self) -> int:
         """Gets size of all files in used neo4j database"""
-        search_pattern = "/neo4j_data/data/databases/pod"
+        home_directory = os.path.expanduser("~")
+        search_pattern = os.path.join(home_directory, "neo4j-*/data/databases/neo4j")
         matching_directories = glob.glob(search_pattern)
         if len(matching_directories) > 1:
             raise RuntimeError("Multiple Neo4j installations found. Please make sure only one exists in your user directory")
@@ -1241,7 +1195,7 @@ class Neo4jPodStorage(PodStorage):
             raise RuntimeError("No Neo4j installation found. Please make sure you have it installed in your user directory")
         else:
             neo4j_dir = matching_directories[0]
-        neo4j_path = os.path.join("/", neo4j_dir)
+        neo4j_path = os.path.join(home_directory, neo4j_dir)
         total_size = 0
         for dirpath, dirnames, filenames in os.walk(neo4j_path):
             for f in filenames:
@@ -1262,8 +1216,8 @@ class MongoPodStorageWriter(PodWriter):
 
     def __init__(self, storage: MongoPodStorage) -> None:
         self.storage = storage
-        self.pods: List[Tuple[SerializedPodId, Optional[bytes]]] = []
-        self.dependency_map: Dict[SerializedPodId, Set[PodId]] = {}
+        self.pods: List[Tuple[PodId, bytes]] = []
+        self.dependency_map: Dict[PodId, Set[PodId]] = {}
         self.new_pid_synonyms: Dict[SerializedPodId, SerializedPodId] = {}
         self.new_ranks: Dict[SerializedPodId, int] = {}
 
@@ -1296,9 +1250,8 @@ class MongoPodStorageWriter(PodWriter):
         self.new_pid_synonyms = {}
         self.new_ranks = {}
 
-    def _construct_pod_documents(self, serialized_pod_id: SerializedPodId, pod_bytes: Optional[bytes], is_synonym: bool):
+    def construct_pod_documents(self, serialized_pod_id: SerializedPodId, pod_bytes: Optional[bytes], is_synonym: bool):
         if not is_synonym:
-            assert pod_bytes is not None
             pod_bytes_memview = memoryview(pod_bytes)
             return [
                 {
@@ -1340,17 +1293,15 @@ class MongoPodStorageWriter(PodWriter):
     def write_dep(
         self,
         pod_id: PodId,
-        dep: PodDependency,
+        dep_pids: Set[PodId],  # List of pids this pod depends on.
     ) -> None:
         self.dependency_map[serialize_pod_id(pod_id)] = dep.dep_pids
-        self.new_ranks[serialize_pod_id(pod_id)] = dep.rank
 
 
 class MongoPodStorageReader(PodReader):
-    def __init__(self, storage: MongoPodStorage, hint_pod_ids: List[PodId], cache: Dict[Tuple, bytearray]) -> None:
+    def __init__(self, storage: MongoPodStorage, hint_pod_ids: List[PodId]) -> None:
         self.storage = storage
         self.hint_pod_ids = hint_pod_ids
-        self.cache = cache
 
     def read(self, pod_id: PodId) -> io.IOBase:
         serialized_pod_id = serialize_pod_id(pod_id)
@@ -1370,9 +1321,8 @@ class MongoPodStorageReader(PodReader):
         return io.BytesIO(self.cache[serialized_pod_id])
 
     def dep_pids_by_rank(self) -> List[PodId]:
-        ranked_pod_ids = [deserialize_pod_id(p) for p in self.cache.keys()]
-        ranked_pod_ids.sort(key=lambda p: self.storage.pid_rank(p))
-        return ranked_pod_ids
+        logger.warning(f"Need to implement {type(self).__name__}::dep_pids_by_rank")
+        return self.hint_pod_ids
 
 
 class MongoPodStorage(PodStorage):
@@ -1384,7 +1334,6 @@ class MongoPodStorage(PodStorage):
         self.db.pod_synonyms.create_index("pod_id")
         self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
         self.synonyms: Dict[SerializedPodId, SerializedPodId] = {}
-        self.ranks: Dict[SerializedPodId, int] = {}
         self._fetch_synonyms()
 
     def _fetch_synonyms(self):
