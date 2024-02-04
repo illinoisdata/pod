@@ -488,6 +488,158 @@ class PostgreSQLPodStorageWriter(PodWriter):
         self.storage = storage
         self.storage_buffer: List[Tuple] = []
         self.dependency_buffer: List[Tuple] = []
+        self.ranks_buffer: List[Tuple] = []
+        self.buf_size = 0
+        self.new_pid_synonyms: List[Tuple] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            self.storage.db_conn.rollback()
+        else:
+            self.flush_synonyms()
+            self.flush_storage()
+            self.flush_dependencies()
+            self.flush_ranks()
+            self.storage.db_conn.commit()
+
+    def flush_storage(self):
+        if self.buf_size == 0:
+            return
+        with self.storage.db_conn.cursor() as cursor:
+            query = """
+                INSERT INTO pod_storage (tid, oid, chunk, pod_bytes)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (tid, oid, chunk) DO UPDATE SET pod_bytes = EXCLUDED.pod_bytes;
+            """
+            cursor.executemany(query, self.storage_buffer)
+        self.storage_buffer = []
+        self.buf_size = 0
+
+    def flush_dependencies(self):
+        if len(self.dependency_buffer) == 0:
+            return
+        with self.storage.db_conn.cursor() as cursor:
+            # Constructing insert query
+            insert_values = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x).decode() for x in self.dependency_buffer)
+            if insert_values:
+                insert_query = f"""
+                    INSERT INTO pod_dependencies (pod_id_tid, pod_id_oid, dep_pid_tid, dep_pid_oid)
+                    VALUES {insert_values}
+                    ON CONFLICT DO NOTHING
+                """
+                cursor.execute(insert_query)
+        self.dependency_buffer = []
+
+    def flush_synonyms(self):
+        if len(self.new_pid_synonyms) == 0:
+            return
+        with self.storage.db_conn.cursor() as cursor:
+            insert_values = ",".join(cursor.mogrify("(%s,%s,%s,%s)", x).decode() for x in self.new_pid_synonyms)
+            if insert_values:
+                insert_query = f"""
+                    INSERT INTO pod_synonyms (pod_tid, pod_oid, syn_tid, syn_oid)
+                    VALUES {insert_values};
+                """
+                cursor.execute(insert_query)
+        self.storage.synonyms.update({make_pod_id(r[0], r[1]): make_pod_id(r[2], r[3]) for r in self.new_pid_synonyms})
+        self.new_pid_synonyms = []
+    
+    def flush_ranks(self):
+        if len(self.new_pid_synonyms) == 0:
+            return
+        with self.storage.db_conn.cursor() as cursor:
+            insert_values = ",".join(cursor.mogrify("(%s,%s,%s)", x).decode() for x in self.ranks_buffer)
+            if insert_values:
+                insert_query = f"""
+                    INSERT INTO pod_ranks (tid, oid, rank)
+                    VALUES {insert_values};
+                """
+                cursor.execute(insert_query)
+        self.ranks_buffer = []
+
+    def write_pod(
+        self,
+        pod_id: PodId,
+        pod_bytes: bytes,
+    ) -> None:
+        if pod_bytes in self.storage.pod_bytes_memo:
+            # Save as synonymous pids.
+            same_pod_id = self.storage.pod_bytes_memo.get(pod_bytes)
+            self.new_pid_synonyms.append((pod_id.tid, pod_id.oid, same_pod_id.tid, same_pod_id.oid))
+        else:
+            # New pod bytes.
+            pod_bytes_memview = memoryview(pod_bytes)
+            self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
+            for i in range(0, len(pod_bytes), PostgreSQLPodStorageWriter.CHUNK_SIZE):
+                self.buf_size += min(PostgreSQLPodStorageWriter.CHUNK_SIZE, len(pod_bytes) - i)
+                self.storage_buffer.append(
+                    (
+                        pod_id.tid,
+                        pod_id.oid,
+                        int(i / PostgreSQLPodStorageWriter.CHUNK_SIZE),
+                        pod_bytes_memview[i : i + PostgreSQLPodStorageWriter.CHUNK_SIZE],
+                    )
+                )
+                if self.buf_size > PostgreSQLPodStorageWriter.FLUSH_SIZE:
+                    self.flush_storage()
+
+    def write_dep(
+        self,
+        pod_id: PodId,
+        dep: PodDependency,
+    ) -> None:
+        self.dependency_buffer += [(pod_id.tid, pod_id.oid, p.tid, p.oid) for p in dep.dep_pids]
+        self.ranks_buffer.append((pod_id.tid, pod_id.oid, dep.rank))
+
+
+class PostgreSQLPodStorageReader(PodReader):
+    def __init__(self, storage: PostgreSQLPodStorage, hint_pod_ids: List[PodId], cache: Dict[Tuple, Tuple]) -> None:
+        self.storage = storage
+        self.hint_pod_ids = hint_pod_ids
+        self.cache: Dict[Tuple, bytearray] = cache
+
+    def read(self, pod_id: PodId) -> io.IOBase:
+        pod_id = self.storage.synonyms.get(pod_id, pod_id)
+        if (pod_id.tid, pod_id.oid) not in self.cache:
+            with self.storage.db_conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT pod_bytes FROM pod_storage WHERE tid = %s AND oid = %s ORDER BY chunk",
+                    (pod_id.tid, pod_id.oid),
+                )
+                result = cursor.fetchall()
+                if len(result) == 0:
+                    raise ValueError(f"No data found for the given pod_id {pod_id}")
+                self.cache[(pod_id.tid, pod_id.oid)] = bytearray()
+                for item in result:
+                    self.cache[(pod_id.tid, pod_id.oid)].extend(item[0])
+        return io.BytesIO(self.cache[(pod_id.tid, pod_id.oid)])
+
+    def dep_pids_by_rank(self) -> List[PodId]:
+        ranked_pids = []
+        with self.storage.db_conn.cursor() as cursor:
+            # query_values = ",".join(cursor.mogrify("(%s,%s)", x).decode() for x in self.cache.keys())
+            query_values = list(self.cache.keys())
+            cursor.execute(f"""SELECT tid, oid, rank FROM pod_ranks 
+                                WHERE (tid, oid) = ANY (%s)
+                                ORDER BY rank;""", (query_values,))
+            result = cursor.fetchall()
+            for row in result:
+                tid, oid, rank = row
+                ranked_pids.append(make_pod_id(tid, oid))
+        return ranked_pids
+
+
+class PostgreSQLPodStorageWriter(PodWriter):
+    CHUNK_SIZE = 100_000_000  # 90 MB
+    FLUSH_SIZE = 500_000_000  # 5 GB
+
+    def __init__(self, storage: PostgreSQLPodStorage) -> None:
+        self.storage = storage
+        self.storage_buffer: List[Tuple] = []
+        self.dependency_buffer: List[Tuple] = []
         self.buf_size = 0
         self.new_pid_synonyms: List[Tuple] = []
 
@@ -843,6 +995,7 @@ class RedisPodStorageWriter(PodWriter):
         self.pod_data: Dict[PodId, bytes] = {}
         self.dependency_map: Dict[PodId, Set[str]] = {}
         self.new_pid_synonyms: Dict[PodId, PodId] = {}
+        self.ranks: Dict[PodId, int] = {}
 
     def __enter__(self):
         return self
@@ -855,6 +1008,7 @@ class RedisPodStorageWriter(PodWriter):
             for pod_id, bytes in self.pod_data.items():
                 pipe.set(f"pod_bytes:{pod_id.redis_str()}", bytes)
                 if pod_id in self.dependency_map:  # Assuming all pods and dependencies being written
+                    pipe.set(f"pod_ranks:{pod_id.redis_str()}", self.ranks[pod_id])
                     dep_pids = self.dependency_map[pod_id]
                     if dep_pids:
                         pipe.sadd(f"dep_pids:{pod_id.redis_str()}", *dep_pids)
@@ -865,6 +1019,7 @@ class RedisPodStorageWriter(PodWriter):
         self.new_pid_synonyms = {}
         self.dependency_map = {}
         self.pod_data = {}
+        self.ranks = {}
 
     def write_pod(self, pod_id: PodId, pod_bytes: bytes) -> None:
         if pod_bytes in self.storage.pod_bytes_memo:
@@ -880,15 +1035,19 @@ class RedisPodStorageWriter(PodWriter):
     ) -> None:
         serialized_dep_pids = {pid.redis_str() for pid in dep.dep_pids}
         self.dependency_map[pod_id] = serialized_dep_pids
+        self.ranks[pod_id] = dep.rank
 
 
 class RedisPodStorageReader(PodReader):
-    def __init__(self, storage: RedisPodStorage, hint_pod_ids: List[PodId]) -> None:
+    def __init__(self, storage: RedisPodStorage, hint_pod_ids: List[PodId], cache: Dict[PodId, Tuple]) -> None:
         self.storage = storage
         self.hint_pod_ids = hint_pod_ids
+        self.cache = cache
 
     def read(self, pod_id: PodId) -> io.IOBase:
         pod_id = self.storage.synonyms.get(pod_id, pod_id)
+        if pod_id in self.cache:
+            return io.BytesIO(self.cache[pod_id][0])
         pod_bytes = self.storage.redis_client.get(f"pod_bytes:{pod_id.redis_str()}")
         pod_bytes = cast(bytes, pod_bytes)
         if pod_bytes is None:
@@ -896,8 +1055,8 @@ class RedisPodStorageReader(PodReader):
         return io.BytesIO(pod_bytes)
 
     def dep_pids_by_rank(self) -> List[PodId]:
-        logger.warning(f"Need to implement {type(self).__name__}::dep_pids_by_rank")
-        return self.hint_pod_ids
+        ranks = sorted([(self.cache[k][1], k) for k in self.cache.keys()])
+        return [r[1] for r in ranks] 
 
 
 class RedisPodStorage(PodStorage):
@@ -913,7 +1072,8 @@ class RedisPodStorage(PodStorage):
             pipeline.get(key)
         results = pipeline.execute()
         for key, synonym in zip(self.redis_client.scan_iter("pod_synonyms:*"), results):
-            pid_redis_str = key.split(b":")[1]
+            key = key.decode("utf-8")
+            pid_redis_str = key.split(":")[1]
             pod_id = PodId.from_redis_str(pid_redis_str)
             self.synonyms[pod_id] = PodId.from_redis_str(synonym)
 
@@ -921,7 +1081,39 @@ class RedisPodStorage(PodStorage):
         return RedisPodStorageWriter(self)
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
-        return RedisPodStorageReader(self, hint_pod_ids)
+        cache = {}
+        current_level = list(hint_pod_ids)
+        pipe = self.redis_client.pipeline()
+        while current_level:
+            next_level = []
+            for p in current_level:
+                pipe.smembers(f"dep_pids:{p.redis_str()}")
+                pipe.get(f"pod_ranks:{p.redis_str()}")
+                pipe.get(f"pod_bytes:{p.redis_str()}")
+            results = pipe.execute()
+            if results:
+                for i in range(0, len(results), 3):
+                    deps, rank, pod_bytes = results[i], results[i+1], results[i+2]
+                    pod_bytes = cast(bytes, pod_bytes)
+                    if rank is None:
+                        continue
+                    cache[current_level[i//3]] = (pod_bytes, rank)
+                    for pod_id_str in deps:
+                        next_level.append(PodId.from_redis_str(pod_id_str.decode('utf-8')))
+            current_level = next_level
+
+        for k in cache.keys():
+            pipe.get(f"pod_synonyms:{k.redis_str()}")
+        syns = pipe.execute()
+        for s in syns:
+            if s:
+                pipe.get(f"pod_ranks:{s.redis_str()}")
+                pipe.get(f"pod_bytes:{s.redis_str()}")
+        syn_results = pipe.execute()
+        for i in range(0, len(syn_results), 2):
+            rank, pod_bytes = syn_results[i], syn_results[i+1]
+            cache[PodId.from_redis_str(syns[i//2].decode('utf-8'))] = (pod_bytes, rank)
+        return RedisPodStorageReader(self, hint_pod_ids, cache)
 
     def estimate_size(self) -> int:
         memory_data = self.redis_client.info("memory")
@@ -979,14 +1171,15 @@ class Neo4jPodStorageWriter(PodWriter):
 
 
 class Neo4jPodStorageReader(PodReader):
-    def __init__(self, storage: Neo4jPodStorage, hint_pod_ids: List[PodId]) -> None:
+    def __init__(self, storage: Neo4jPodStorage, hint_pod_ids: List[PodId], cache: Dict[bytes, bytes]) -> None:
         self.storage = storage
         self.hint_pod_ids = hint_pod_ids
+        self.cache = cache
 
     def read(self, pod_id: PodId) -> io.IOBase:
         serialized_pod_id = serialize_pod_id(pod_id)
-        if serialized_pod_id in self.storage.cache:
-            return self.storage.cache[serialized_pod_id]
+        if serialized_pod_id in self.cache:
+            return io.BytesIO(self.cache[serialized_pod_id])
         with self.storage.session() as session:
             result = session.run("MATCH (p:Pod {pod_id: $pod_id}) RETURN p.pod_bytes", pod_id=serialized_pod_id)
             record = result.single()
@@ -1008,7 +1201,6 @@ class Neo4jPodStorage(PodStorage):
         self.database = database
         with self.session() as session:
             session.run("CREATE INDEX pod_id_index IF NOT EXISTS FOR (p:Pod) ON (p.pod_id);")
-        self.cache: Dict[bytes, io.BytesIO] = {}
 
     def session(self) -> neo4j.Session:
         if self.database is not None:
@@ -1020,6 +1212,7 @@ class Neo4jPodStorage(PodStorage):
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
         serialized_pod_ids = [serialize_pod_id(pid) for pid in hint_pod_ids]
+        cache = {}
         with self.session() as session:
             query = """
             UNWIND $pod_ids AS pod_id
@@ -1034,9 +1227,9 @@ class Neo4jPodStorage(PodStorage):
                 pid = record["pod_id"]
                 pod_bytes = record["pod_bytes"]
                 if pod_bytes:
-                    self.cache[pid] = io.BytesIO(pod_bytes)
+                    cache[pid] = pod_bytes
 
-        return Neo4jPodStorageReader(self, hint_pod_ids)
+        return Neo4jPodStorageReader(self, hint_pod_ids, cache)
 
     def estimate_size(self) -> int:
         """Gets size of all files in used neo4j database"""
@@ -1072,6 +1265,7 @@ class MongoPodStorageWriter(PodWriter):
         self.pods: List[Tuple[SerializedPodId, Optional[bytes]]] = []
         self.dependency_map: Dict[SerializedPodId, Set[PodId]] = {}
         self.new_pid_synonyms: Dict[SerializedPodId, SerializedPodId] = {}
+        self.new_ranks: Dict[SerializedPodId, int] = {}
 
     def __enter__(self):
         return self
@@ -1086,17 +1280,23 @@ class MongoPodStorageWriter(PodWriter):
             is_synonym = serialized_pod_id in self.new_pid_synonyms
             if is_synonym:
                 self.storage.synonyms[serialized_pod_id] = self.new_pid_synonyms[serialized_pod_id]
-            current_docs = self.construct_pod_documents(serialized_pod_id, pod_bytes, is_synonym)
-            deps = self.construct_dependency_documents(serialized_pod_id)  # Assumes all pod bytes and dependencies are written
+            current_docs = self._construct_pod_documents(serialized_pod_id, pod_bytes, is_synonym)
+            deps = self._construct_dependency_documents(serialized_pod_id)  # Assumes all pod bytes and dependencies are written
             all_docs.extend(current_docs)
             deps_list.append(deps)
-        self.storage.db.pod_storage.insert_many(all_docs)
-        self.storage.db.pod_dependencies.insert_many(deps_list)
+        syns_list = self._construct_synonym_documents()
+        if all_docs:
+            self.storage.db.pod_storage.insert_many(all_docs)
+        if deps_list:
+            self.storage.db.pod_dependencies.insert_many(deps_list)
+        if syns_list:
+            self.storage.db.pod_synonyms.insert_many(syns_list)
         self.pods = []
         self.dependency_map = {}
         self.new_pid_synonyms = {}
+        self.new_ranks = {}
 
-    def construct_pod_documents(self, serialized_pod_id: SerializedPodId, pod_bytes: Optional[bytes], is_synonym: bool):
+    def _construct_pod_documents(self, serialized_pod_id: SerializedPodId, pod_bytes: Optional[bytes], is_synonym: bool):
         if not is_synonym:
             assert pod_bytes is not None
             pod_bytes_memview = memoryview(pod_bytes)
@@ -1105,13 +1305,14 @@ class MongoPodStorageWriter(PodWriter):
                     "pod_id": serialized_pod_id,
                     "chunk": i,
                     "pod_bytes": pod_bytes_memview[i : i + MongoPodStorageWriter.MAX_BYTES_SIZE].tobytes(),
+                    **({"rank": self.new_ranks[serialized_pod_id]} if i == 0 else {})
                 }
                 for i in range(0, len(pod_bytes), MongoPodStorageWriter.MAX_BYTES_SIZE)
             ]
         else:
-            return [{"pod_id": serialized_pod_id, "synonym": self.new_pid_synonyms[serialized_pod_id]}]
+            return [{"pod_id": serialized_pod_id, "rank": self.new_ranks[serialized_pod_id]}]
 
-    def construct_dependency_documents(self, serialized_pod_id: SerializedPodId):
+    def _construct_dependency_documents(self, serialized_pod_id: SerializedPodId):
         deps_list = [
             serialize_pod_id(dep_pid)
             for dep_pid in self.dependency_map[serialized_pod_id]
@@ -1119,6 +1320,9 @@ class MongoPodStorageWriter(PodWriter):
         ]
         deps = {"pod_id": serialized_pod_id, "dependencies": deps_list}
         return deps
+    
+    def _construct_synonym_documents(self):
+        return [{"pod_id": serialized_pod_id, "synonym": serialized_synonym} for serialized_pod_id, serialized_synonym in self.new_pid_synonyms.items()]
 
     def write_pod(
         self,
@@ -1139,18 +1343,20 @@ class MongoPodStorageWriter(PodWriter):
         dep: PodDependency,
     ) -> None:
         self.dependency_map[serialize_pod_id(pod_id)] = dep.dep_pids
+        self.new_ranks[serialize_pod_id(pod_id)] = dep.rank
 
 
 class MongoPodStorageReader(PodReader):
-    def __init__(self, storage: MongoPodStorage, hint_pod_ids: List[PodId]) -> None:
+    def __init__(self, storage: MongoPodStorage, hint_pod_ids: List[PodId], cache: Dict[Tuple, bytearray]) -> None:
         self.storage = storage
         self.hint_pod_ids = hint_pod_ids
+        self.cache = cache
 
     def read(self, pod_id: PodId) -> io.IOBase:
         serialized_pod_id = serialize_pod_id(pod_id)
         if serialized_pod_id in self.storage.synonyms:
             serialized_pod_id = self.storage.synonyms[serialized_pod_id]
-        if serialized_pod_id not in self.storage.cache:
+        if serialized_pod_id not in self.cache:
             cursor = self.storage.db.pod_storage.find({"pod_id": serialized_pod_id}).sort({"chunk": 1})
             pod_byte_array = bytearray()
             for result in cursor:
@@ -1160,12 +1366,13 @@ class MongoPodStorageReader(PodReader):
                     raise ValueError(f"Invalid chunk for pod id: {pod_id}")
             if len(pod_byte_array) == 0:
                 raise KeyError(f"Data not found for Pod ID: {pod_id}")
-            self.storage.cache[serialized_pod_id] = pod_byte_array
-        return io.BytesIO(self.storage.cache[serialized_pod_id])
+            self.cache[serialized_pod_id] = pod_byte_array
+        return io.BytesIO(self.cache[serialized_pod_id])
 
     def dep_pids_by_rank(self) -> List[PodId]:
-        logger.warning(f"Need to implement {type(self).__name__}::dep_pids_by_rank")
-        return self.hint_pod_ids
+        ranked_pod_ids = [deserialize_pod_id(p) for p in self.cache.keys()]
+        ranked_pod_ids.sort(key=lambda p: self.storage.pid_rank(p))
+        return ranked_pod_ids
 
 
 class MongoPodStorage(PodStorage):
@@ -1174,13 +1381,14 @@ class MongoPodStorage(PodStorage):
         self.db = self.mongo_client.pod
         self.db.pod_storage.create_index("pod_id")
         self.db.pod_dependencies.create_index("pod_id")
-        self.cache: Dict[SerializedPodId, bytearray] = {}
+        self.db.pod_synonyms.create_index("pod_id")
         self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
         self.synonyms: Dict[SerializedPodId, SerializedPodId] = {}
+        self.ranks: Dict[SerializedPodId, int] = {}
         self._fetch_synonyms()
 
     def _fetch_synonyms(self):
-        synonyms = self.db.pod_storage.find({"synonym": {"$exists": True}}, {"_id": 0})
+        synonyms = self.db.pod_synonyms.find({})
         for row in synonyms:
             self.synonyms[row["pod_id"]] = row["synonym"]
 
@@ -1188,50 +1396,71 @@ class MongoPodStorage(PodStorage):
         return MongoPodStorageWriter(self)
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
-        # serialized_hint_pod_ids = [serialize_pod_id(pid) for pid in hint_pod_ids]
-        # pipeline = [
-        #     {"$match": {"pod_id": {"$in": serialized_hint_pod_ids}}},
-        #     {
-        #         "$graphLookup": {
-        #             "from": "pod_dependencies",
-        #             "startWith": "$pod_id",
-        #             "connectFromField": "dependencies",
-        #             "connectToField": "pod_id",
-        #             "as": "all_dependencies"
-        #         }
-        #     },
-        #     {
-        #         "$project": {
-        #             "all_pod_ids": {
-        #                 "$setUnion": [
-        #                     ["$pod_id"],
-        #                     "$all_dependencies.pod_id"
-        #                 ]
-        #             }
-        #         }
-        #     },
-        #     {"$unwind": "$all_pod_ids"},
-        #     {"$group": {"_id": None, "unique_pod_ids": {"$addToSet": "$all_pod_ids"}}}
-        # ]
-        # all_pod_ids = self.db.pod_dependencies.aggregate(pipeline, allowDiskUse=True)
-        # pods_to_fetch = []
-        # for row in all_pod_ids:
-        #     # print(row)
-        #     unique_pod_ids = row.get("unique_pod_ids", [])
-        #     pods_to_fetch.extend(unique_pod_ids)
+        serialized_hint_pod_ids = [serialize_pod_id(pid) for pid in hint_pod_ids]
+        pipeline = [
+            {"$match": {"pod_id": {"$in": serialized_hint_pod_ids}}},
+            {
+                "$graphLookup": {
+                    "from": "pod_dependencies",
+                    "startWith": "$pod_id",
+                    "connectFromField": "dependencies",
+                    "connectToField": "pod_id",
+                    "as": "all_dependencies"
+                }
+            },
+            {
+                "$project": {
+                    "orig_pod_ids": {
+                        "$setUnion": [
+                            ["$pod_id"],
+                            "$all_dependencies.pod_id"
+                        ]
+                    }
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "pod_synonyms",
+                    "localField": "orig_pod_ids",
+                    "foreignField": "pod_id",
+                    "as": "synonyms_docs"
+                }
+            },
+            {
+                "$project": {
+                    "all_pod_ids": {
+                        "$setUnion": [
+                            "$orig_pod_ids",
+                            "$synonyms_docs.synonym"
+                        ]
+                    }
+                }
+            },
+            {"$unwind": "$all_pod_ids"},
+            {"$group": {"_id": None, "unique_pod_ids": {"$addToSet": "$all_pod_ids"}}}
+        ]
+        all_pod_ids = self.db.pod_dependencies.aggregate(pipeline, allowDiskUse=True)
+        pods_to_fetch = []
+        for row in all_pod_ids:
+            unique_pod_ids = row.get("unique_pod_ids", [])
+            pods_to_fetch.extend(unique_pod_ids)
 
-        # # print(len(set(pods_to_fetch)))
-        # # print("UNIQUE POD IDS FOUND")
-        # count = 0
-        # result = self.db.pod_storage.find({"pod_id" : {"$in": pods_to_fetch}}, {"_id" : 0}).sort({"pod_id" : 1, "chunk": 1})
-        # for row in result:
-        #     count += 1
-        #     if row["pod_id"] not in self.cache:
-        #         self.cache[row["pod_id"]] = bytearray()
-        #     self.cache[row["pod_id"]].extend(row["pod_bytes"])
-        # print(f"POD IDS FOUND {count}")
-        return MongoPodStorageReader(self, hint_pod_ids)
+        count = 0
+        cache = {}
+        result = self.db.pod_storage.find({"pod_id" : {"$in": pods_to_fetch}}, {"_id" : 0}).sort({"pod_id" : 1, "chunk": 1})
+        for row in result:
+            count += 1
+            if "rank" in row:
+                self.ranks[row["pod_id"]] = row["rank"]
+            if row["pod_id"] not in cache:
+                cache[row["pod_id"]] = bytearray()
+            if "pod_bytes" in row:
+                cache[row["pod_id"]].extend(row["pod_bytes"])
+        return MongoPodStorageReader(self, hint_pod_ids, cache)
 
+    def pid_rank(self, pid: PodId) -> int:
+        return self.ranks[serialize_pod_id(pid)]
+    
     def estimate_size(self) -> int:
         pod_storage_stats = self.db.command("collstats", self.db.pod_storage.name)
         pod_dep_stats = self.db.command("collstats", self.db.pod_dependencies.name)
