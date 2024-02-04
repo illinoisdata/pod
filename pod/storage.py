@@ -793,7 +793,7 @@ class PostgreSQLPodStorage(PodStorage):
             tid, oid, syn_tid, syn_oid = row
             self.synonyms[make_pod_id(tid, oid)] = make_pod_id(syn_tid, syn_oid)
 
-    def _prefetch_dependencies(self, cursor: psycopg2.extensions.cursor, hint_tid_oid_array: List[Tuple]):
+    def _prefetch_dependencies(self, cursor: psycopg2.extensions.cursor, hint_tid_oid_array: List[List]):
         cursor.execute("SELECT * FROM get_dependencies(%s::BIGINT[][])", (hint_tid_oid_array,))
         results = cursor.fetchall()
 
@@ -813,7 +813,7 @@ class PostgreSQLPodStorage(PodStorage):
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
         if len(hint_pod_ids) > 0:
-            hint_tid_oid_array = [(p.tid, p.oid) for p in hint_pod_ids]
+            hint_tid_oid_array = [[p.tid, p.oid] for p in hint_pod_ids]
             with self.db_conn.cursor() as cursor:
                 self._prefetch_dependencies(cursor, hint_tid_oid_array)
         return PostgreSQLPodStorageReader(self, hint_pod_ids)
@@ -935,10 +935,14 @@ class RedisPodStorage(PodStorage):
 
 
 class Neo4jPodStorageWriter(PodWriter):
+    FLUSH_SIZE = 1_000_000_000
+
     def __init__(self, storage: Neo4jPodStorage) -> None:
         self.storage = storage
-        self.pod_data: List[Tuple[bytes, bytes]] = []
+        self.pod_data: List[Tuple[bytes, Optional[bytes]]] = []
         self.dependencies: List[Tuple[bytes, bytes]] = []
+        self.new_pid_synonyms: List[Tuple[bytes, bytes]] = []
+        self.buf_size = 0
 
     def __enter__(self):
         return self
@@ -962,11 +966,30 @@ class Neo4jPodStorageWriter(PodWriter):
                     "CREATE (p)-[:DEPENDS_ON]->(depPod)",
                     deps_list=self.dependencies,
                 )
+
+                # Write all synonyms at once
+                tx.run(
+                    "UNWIND $syns_list AS syns "
+                    "MATCH (p:Pod {pod_id: syns[0]}) "
+                    "MATCH (syn:Pod {pod_id: syns[1]}) "
+                    "CREATE (p)-[:SYNONYMS_WITH]->(syn)",
+                    syns_list=self.new_pid_synonyms,
+                )
                 tx.commit()
+        self.new_pid_synonyms = []
+        self.dependencies = []
+        self.pod_data = []
+        self.buf_size = 0
 
     def write_pod(self, pod_id: PodId, pod_bytes: bytes) -> None:
         serialized_pod_id = serialize_pod_id(pod_id)
-        self.pod_data.append((serialized_pod_id, pod_bytes))
+        if pod_bytes in self.storage.pod_bytes_memo:
+            self.new_pid_synonyms.append((serialized_pod_id, serialize_pod_id(self.storage.pod_bytes_memo.get(pod_bytes))))
+            self.pod_data.append((serialized_pod_id, None))
+            self.storage.synonyms[pod_id] = self.storage.pod_bytes_memo.get(pod_bytes)
+        else:
+            self.pod_data.append((serialized_pod_id, pod_bytes))
+            self.buf_size += len(pod_bytes)
 
     def write_dep(
         self,
@@ -976,6 +999,8 @@ class Neo4jPodStorageWriter(PodWriter):
         serialized_pod_id = serialize_pod_id(pod_id)
         new_deps = [(serialized_pod_id, serialize_pod_id(dep)) for dep in dep.dep_pids]
         self.dependencies += new_deps
+        if self.buf_size > Neo4jPodStorageWriter.FLUSH_SIZE:
+            self.flush_data()
 
 
 class Neo4jPodStorageReader(PodReader):
@@ -984,6 +1009,7 @@ class Neo4jPodStorageReader(PodReader):
         self.hint_pod_ids = hint_pod_ids
 
     def read(self, pod_id: PodId) -> io.IOBase:
+        pod_id = self.storage.synonyms.get(pod_id, pod_id)
         serialized_pod_id = serialize_pod_id(pod_id)
         if serialized_pod_id in self.storage.cache:
             return self.storage.cache[serialized_pod_id]
@@ -1007,8 +1033,24 @@ class Neo4jPodStorage(PodStorage):
         self.driver = neo4j.GraphDatabase.driver(f"{uri}:{port}", auth=("neo4j", password))
         self.database = database
         with self.session() as session:
-            session.run("CREATE INDEX pod_id_index IF NOT EXISTS FOR (p:Pod) ON (p.pod_id);")
+            # session.run("CREATE INDEX pod_id_index IF NOT EXISTS FOR (p:Pod) ON (p.pod_id);")
+            session.run("CREATE CONSTRAINT FOR (p:Pod) REQUIRE p.pod_id IS UNIQUE;")
         self.cache: Dict[bytes, io.BytesIO] = {}
+        self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
+        self.synonyms: PodIdSynonym = {}
+        self._fetch_synonyms()
+
+    def _fetch_synonyms(self):
+        with self.session() as session:
+            query = """
+            MATCH (p:Pod)-[:SYNONYMS_WITH]-(s:Pod)
+            RETURN p as pod_id, s as syn
+            """
+            result = session.run(query)
+            for record in result:
+                pod_id = record["pod_id"]
+                syn = record["syn"]
+                self.synonyms[deserialize_pod_id(pod_id)] = deserialize_pod_id(syn)
 
     def session(self) -> neo4j.Session:
         if self.database is not None:
@@ -1025,8 +1067,10 @@ class Neo4jPodStorage(PodStorage):
             UNWIND $pod_ids AS pod_id
             MATCH (p:Pod {pod_id: pod_id})
             OPTIONAL MATCH (p)-[:DEPENDS_ON*]->(depPod:Pod)
-            WITH p, COLLECT(DISTINCT depPod) AS depPods
-            UNWIND [p] + depPods AS allPods
+            OPTIONAL MATCH (depPod)-[:SYNONYMS_WITH]-(synPod:Pod)
+            OPTIONAL MATCH (p)-[:SYNONYMS_WITH]-(pSyn:Pod)
+            WITH p, COLLECT(DISTINCT depPod) + COLLECT(DISTINCT synPod) + COLLECT(DISTINCT pSyn) AS relatedPods
+            UNWIND [p] + relatedPods AS allPods
             RETURN DISTINCT allPods.pod_id AS pod_id, allPods.pod_bytes AS pod_bytes
             """
             result = session.run(query, pod_ids=serialized_pod_ids)
