@@ -983,18 +983,13 @@ class RedisPodStorageWriter(PodWriter):
         self.ranks = {}
 
     def write_pod(self, pod_id: PodId, pod_bytes: bytes) -> None:
-        serialized_pod_id = serialize_pod_id(pod_id)
         if pod_bytes in self.storage.pod_bytes_memo:
-            self.new_pid_synonyms[serialized_pod_id] = serialize_pod_id(self.storage.pod_bytes_memo.get(pod_bytes))
+            self.new_pid_synonyms[pod_id] = self.storage.pod_bytes_memo.get(pod_bytes)
         else:
             self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
-            self.pod_data[serialized_pod_id] = pod_bytes
+            self.pod_data[pod_id] = pod_bytes
 
-    def write_dep(
-        self,
-        pod_id: PodId,
-        dep: PodDependency,
-    ) -> None:
+    def write_dep(self, pod_id: PodId, dep: PodDependency) -> None:
         serialized_dep_pids = {pid.redis_str() for pid in dep.dep_pids}
         self.dependency_map[pod_id] = serialized_dep_pids
         self.ranks[pod_id] = dep.rank
@@ -1250,7 +1245,7 @@ class MongoPodStorageWriter(PodWriter):
         self.new_pid_synonyms = {}
         self.new_ranks = {}
 
-    def construct_pod_documents(self, serialized_pod_id: SerializedPodId, pod_bytes: Optional[bytes], is_synonym: bool):
+    def _construct_pod_documents(self, serialized_pod_id: SerializedPodId, pod_bytes: Optional[bytes], is_synonym: bool):
         if not is_synonym:
             pod_bytes_memview = memoryview(pod_bytes)
             return [
@@ -1293,20 +1288,21 @@ class MongoPodStorageWriter(PodWriter):
     def write_dep(
         self,
         pod_id: PodId,
-        dep_pids: Set[PodId],  # List of pids this pod depends on.
+        dep: PodDependency,  # List of pids this pod depends on.
     ) -> None:
         self.dependency_map[serialize_pod_id(pod_id)] = dep.dep_pids
+        self.new_ranks[serialize_pod_id(pod_id)] = dep.rank
 
 
 class MongoPodStorageReader(PodReader):
-    def __init__(self, storage: MongoPodStorage, hint_pod_ids: List[PodId]) -> None:
+    def __init__(self, storage: MongoPodStorage, hint_pod_ids: List[PodId], cache: Dict[SerializedPodId, bytearray]) -> None:
         self.storage = storage
         self.hint_pod_ids = hint_pod_ids
+        self.cache = cache
 
     def read(self, pod_id: PodId) -> io.IOBase:
         serialized_pod_id = serialize_pod_id(pod_id)
-        if serialized_pod_id in self.storage.synonyms:
-            serialized_pod_id = self.storage.synonyms[serialized_pod_id]
+        serialized_pod_id = self.storage.synonyms.get(serialized_pod_id, serialized_pod_id)
         if serialized_pod_id not in self.cache:
             cursor = self.storage.db.pod_storage.find({"pod_id": serialized_pod_id}).sort({"chunk": 1})
             pod_byte_array = bytearray()
@@ -1321,8 +1317,9 @@ class MongoPodStorageReader(PodReader):
         return io.BytesIO(self.cache[serialized_pod_id])
 
     def dep_pids_by_rank(self) -> List[PodId]:
-        logger.warning(f"Need to implement {type(self).__name__}::dep_pids_by_rank")
-        return self.hint_pod_ids
+        ranked_pod_ids = [deserialize_pod_id(p) for p in self.cache.keys()]
+        ranked_pod_ids.sort(key=lambda p: self.storage.pid_rank(p))
+        return ranked_pod_ids
 
 
 class MongoPodStorage(PodStorage):
@@ -1335,6 +1332,7 @@ class MongoPodStorage(PodStorage):
         self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
         self.synonyms: Dict[SerializedPodId, SerializedPodId] = {}
         self._fetch_synonyms()
+        self.ranks: Dict[SerializedPodId, int] = {}
 
     def _fetch_synonyms(self):
         synonyms = self.db.pod_synonyms.find({})
@@ -1413,4 +1411,5 @@ class MongoPodStorage(PodStorage):
     def estimate_size(self) -> int:
         pod_storage_stats = self.db.command("collstats", self.db.pod_storage.name)
         pod_dep_stats = self.db.command("collstats", self.db.pod_dependencies.name)
-        return pod_storage_stats["size"] + pod_dep_stats["size"]  # Size in bytes
+        pod_syns_stats = self.db.command("collstats", self.db.pod_synonyms.name)
+        return pod_storage_stats["size"] + pod_dep_stats["size"] + pod_syns_stats["size"]   # Size in bytes
