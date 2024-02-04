@@ -900,7 +900,7 @@ class RedisPodStorageReader(PodReader):
 
     def dep_pids_by_rank(self) -> List[PodId]:
         ranks = sorted([(self.cache[k][1], k) for k in self.cache.keys()])
-        return [r[1] for r in ranks] 
+        return [r[1] for r in ranks]
 
 
 class RedisPodStorage(PodStorage):
@@ -937,13 +937,13 @@ class RedisPodStorage(PodStorage):
             results = pipe.execute()
             if results:
                 for i in range(0, len(results), 3):
-                    deps, rank, pod_bytes = results[i], results[i+1], results[i+2]
+                    deps, rank, pod_bytes = results[i], results[i + 1], results[i + 2]
                     pod_bytes = cast(bytes, pod_bytes)
                     if rank is None:
                         continue
-                    cache[current_level[i//3]] = (pod_bytes, rank)
+                    cache[current_level[i // 3]] = (pod_bytes, rank)
                     for pod_id_str in deps:
-                        next_level.append(PodId.from_redis_str(pod_id_str.decode('utf-8')))
+                        next_level.append(PodId.from_redis_str(pod_id_str.decode("utf-8")))
             current_level = next_level
 
         for k in cache.keys():
@@ -955,8 +955,8 @@ class RedisPodStorage(PodStorage):
                 pipe.get(f"pod_bytes:{s.redis_str()}")
         syn_results = pipe.execute()
         for i in range(0, len(syn_results), 2):
-            rank, pod_bytes = syn_results[i], syn_results[i+1]
-            cache[PodId.from_redis_str(syns[i//2].decode('utf-8'))] = (pod_bytes, rank)
+            rank, pod_bytes = syn_results[i], syn_results[i + 1]
+            cache[PodId.from_redis_str(syns[i // 2].decode("utf-8"))] = (pod_bytes, rank)
         return RedisPodStorageReader(self, hint_pod_ids, cache)
 
     def estimate_size(self) -> int:
@@ -1098,8 +1098,8 @@ class MongoPodStorageWriter(PodWriter):
 
     def __init__(self, storage: MongoPodStorage) -> None:
         self.storage = storage
-        self.pods: List[Tuple[PodId, bytes]] = []
-        self.dependency_map: Dict[PodId, Set[PodId]] = {}
+        self.pods: List[Tuple[SerializedPodId, Optional[bytes]]] = []
+        self.dependency_map: Dict[SerializedPodId, Set[PodId]] = {}
         self.new_pid_synonyms: Dict[SerializedPodId, SerializedPodId] = {}
         self.new_ranks: Dict[SerializedPodId, int] = {}
 
@@ -1117,7 +1117,9 @@ class MongoPodStorageWriter(PodWriter):
             if is_synonym:
                 self.storage.synonyms[serialized_pod_id] = self.new_pid_synonyms[serialized_pod_id]
             current_docs = self._construct_pod_documents(serialized_pod_id, pod_bytes, is_synonym)
-            deps = self._construct_dependency_documents(serialized_pod_id)  # Assumes all pod bytes and dependencies are written
+            deps = self._construct_dependency_documents(
+                serialized_pod_id
+            )  # Assumes all pod bytes and dependencies are written
             all_docs.extend(current_docs)
             deps_list.append(deps)
         syns_list = self._construct_synonym_documents()
@@ -1134,13 +1136,14 @@ class MongoPodStorageWriter(PodWriter):
 
     def _construct_pod_documents(self, serialized_pod_id: SerializedPodId, pod_bytes: Optional[bytes], is_synonym: bool):
         if not is_synonym:
+            assert pod_bytes is not None
             pod_bytes_memview = memoryview(pod_bytes)
             return [
                 {
                     "pod_id": serialized_pod_id,
                     "chunk": i,
                     "pod_bytes": pod_bytes_memview[i : i + MongoPodStorageWriter.MAX_BYTES_SIZE].tobytes(),
-                    **({"rank": self.new_ranks[serialized_pod_id]} if i == 0 else {})
+                    **({"rank": self.new_ranks[serialized_pod_id]} if i == 0 else {}),
                 }
                 for i in range(0, len(pod_bytes), MongoPodStorageWriter.MAX_BYTES_SIZE)
             ]
@@ -1155,9 +1158,12 @@ class MongoPodStorageWriter(PodWriter):
         ]
         deps = {"pod_id": serialized_pod_id, "dependencies": deps_list}
         return deps
-    
+
     def _construct_synonym_documents(self):
-        return [{"pod_id": serialized_pod_id, "synonym": serialized_synonym} for serialized_pod_id, serialized_synonym in self.new_pid_synonyms.items()]
+        return [
+            {"pod_id": serialized_pod_id, "synonym": serialized_synonym}
+            for serialized_pod_id, serialized_synonym in self.new_pid_synonyms.items()
+        ]
 
     def write_pod(
         self,
@@ -1239,39 +1245,21 @@ class MongoPodStorage(PodStorage):
                     "startWith": "$pod_id",
                     "connectFromField": "dependencies",
                     "connectToField": "pod_id",
-                    "as": "all_dependencies"
+                    "as": "all_dependencies",
                 }
             },
-            {
-                "$project": {
-                    "orig_pod_ids": {
-                        "$setUnion": [
-                            ["$pod_id"],
-                            "$all_dependencies.pod_id"
-                        ]
-                    }
-                }
-            },
+            {"$project": {"orig_pod_ids": {"$setUnion": [["$pod_id"], "$all_dependencies.pod_id"]}}},
             {
                 "$lookup": {
                     "from": "pod_synonyms",
                     "localField": "orig_pod_ids",
                     "foreignField": "pod_id",
-                    "as": "synonyms_docs"
+                    "as": "synonyms_docs",
                 }
             },
-            {
-                "$project": {
-                    "all_pod_ids": {
-                        "$setUnion": [
-                            "$orig_pod_ids",
-                            "$synonyms_docs.synonym"
-                        ]
-                    }
-                }
-            },
+            {"$project": {"all_pod_ids": {"$setUnion": ["$orig_pod_ids", "$synonyms_docs.synonym"]}}},
             {"$unwind": "$all_pod_ids"},
-            {"$group": {"_id": None, "unique_pod_ids": {"$addToSet": "$all_pod_ids"}}}
+            {"$group": {"_id": None, "unique_pod_ids": {"$addToSet": "$all_pod_ids"}}},
         ]
         all_pod_ids = self.db.pod_dependencies.aggregate(pipeline, allowDiskUse=True)
         pods_to_fetch = []
@@ -1281,7 +1269,7 @@ class MongoPodStorage(PodStorage):
 
         count = 0
         cache = {}
-        result = self.db.pod_storage.find({"pod_id" : {"$in": pods_to_fetch}}, {"_id" : 0}).sort({"pod_id" : 1, "chunk": 1})
+        result = self.db.pod_storage.find({"pod_id": {"$in": pods_to_fetch}}, {"_id": 0}).sort({"pod_id": 1, "chunk": 1})
         for row in result:
             count += 1
             if "rank" in row:
@@ -1294,9 +1282,9 @@ class MongoPodStorage(PodStorage):
 
     def pid_rank(self, pid: PodId) -> int:
         return self.ranks[serialize_pod_id(pid)]
-    
+
     def estimate_size(self) -> int:
         pod_storage_stats = self.db.command("collstats", self.db.pod_storage.name)
         pod_dep_stats = self.db.command("collstats", self.db.pod_dependencies.name)
         pod_syns_stats = self.db.command("collstats", self.db.pod_synonyms.name)
-        return pod_storage_stats["size"] + pod_dep_stats["size"] + pod_syns_stats["size"]   # Size in bytes
+        return pod_storage_stats["size"] + pod_dep_stats["size"] + pod_syns_stats["size"]  # Size in bytes
