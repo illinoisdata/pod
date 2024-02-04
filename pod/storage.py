@@ -574,14 +574,15 @@ class PostgreSQLPodStorageWriter(PodWriter):
     def write_dep(
         self,
         pod_id: PodId,
-        dep_pids: Set[PodId],  # List of pids this pod depends on.
+        dep: PodDependency,
     ) -> None:
-        self.dependency_buffer += [(pod_id.tid, pod_id.oid, p.tid, p.oid) for p in dep_pids]
+        self.dependency_buffer += [(pod_id.tid, pod_id.oid, p.tid, p.oid) for p in dep.dep_pids]
 
 
 class PostgreSQLPodStorageReader(PodReader):
-    def __init__(self, storage: PostgreSQLPodStorage) -> None:
+    def __init__(self, storage: PostgreSQLPodStorage, hint_pod_ids: List[PodId]) -> None:
         self.storage = storage
+        self.hint_pod_ids = hint_pod_ids
 
     def read(self, pod_id: PodId) -> io.IOBase:
         if pod_id in self.storage.synonyms:
@@ -599,6 +600,10 @@ class PostgreSQLPodStorageReader(PodReader):
                 for item in result:
                     self.storage.cache[(pod_id.tid, pod_id.oid)].extend(item[0])
         return io.BytesIO(self.storage.cache[(pod_id.tid, pod_id.oid)])
+
+    def dep_pids_by_rank(self) -> List[PodId]:
+        logger.warning(f"Need to implement {type(self).__name__}::dep_pids_by_rank")
+        return self.hint_pod_ids
 
 
 class PostgreSQLPodStorage(PodStorage):
@@ -807,12 +812,11 @@ class PostgreSQLPodStorage(PodStorage):
         return PostgreSQLPodStorageWriter(self)
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
-        if len(hint_pod_ids) == 0:
-            return PostgreSQLPodStorageReader(self)
-        hint_tid_oid_array = [(p.tid, p.oid) for p in hint_pod_ids]
-        with self.db_conn.cursor() as cursor:
-            self._prefetch_dependencies(cursor, hint_tid_oid_array)
-        return PostgreSQLPodStorageReader(self)
+        if len(hint_pod_ids) > 0:
+            hint_tid_oid_array = [(p.tid, p.oid) for p in hint_pod_ids]
+            with self.db_conn.cursor() as cursor:
+                self._prefetch_dependencies(cursor, hint_tid_oid_array)
+        return PostgreSQLPodStorageReader(self, hint_pod_ids)
 
     def estimate_size(self) -> int:
         with self.db_conn.cursor() as cursor:
