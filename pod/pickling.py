@@ -21,6 +21,7 @@ from dill import Pickler as BasePickler
 from dill import Unpickler as BaseUnpickler
 
 from pod.common import Object, ObjectId, PodDependency, PodId, TimeId, make_pod_id, next_rank, object_id, step_time_id
+from pod.feature import __FEATURE__
 from pod.storage import PodReader, PodStorage, PodWriter
 
 
@@ -351,6 +352,10 @@ class FinalPodPickler(BaseStaticPodPickler):
         self.memo = ctx.memo.next_view(root_pid)
         self.root_rank = next_rank()
 
+    def persistent_id(self, obj: Object) -> Optional[ObjectId]:
+        __FEATURE__.new_pod_oid(self.root_pid, id(obj))
+        return None
+
     def get_root_dep(self) -> PodDependency:
         return PodDependency(
             dep_pids=self.memo.get_dep_pids(),
@@ -392,11 +397,17 @@ class StaticPodPickler(BaseStaticPodPickler):
 
     def persistent_id(self, obj: Object) -> Optional[ObjectId]:
         if obj is self.root_obj:
-            # Always save root object, otherwise infinite recursion.
+            # Always bundle root object, otherwise infinite recursion.
+            __FEATURE__.new_pod_oid(self.root_pid, id(obj))
+            return None
+        if isinstance(obj, StaticPodPickler.MUST_BUNDLE_TYPES):
+            # Always bundle these types without checking the action cache.
+            # __FEATURE__.new_pod_oid(self.root_pid, id(obj))
             return None
 
         pod_action = self.safe_podding_fn(obj)
         if pod_action == PodAction.bundle:
+            __FEATURE__.new_pod_oid(self.root_pid, id(obj))
             return None
 
         # Split and split final.
@@ -419,10 +430,7 @@ class StaticPodPickler(BaseStaticPodPickler):
         # Makes podding_fn safe (consistent action per object + auto-bundle on saved object).
         oid = id(obj)
         if oid not in self.ctx.cached_pod_actions:
-            if isinstance(obj, StaticPodPickler.MUST_BUNDLE_TYPES):
-                # Must-bundle type, otherwise pickling fails.
-                self.ctx.cached_pod_actions[oid] = PodAction.bundle
-            elif oid in self.memo:
+            if oid in self.memo:
                 # Not yet seen by persistent_id but by memoize, this object has been saved in final pickle.
                 self.ctx.cached_pod_actions[oid] = PodAction.bundle
             else:
@@ -456,6 +464,7 @@ class StaticPodPickler(BaseStaticPodPickler):
         this_pod_bytes = this_buffer.getvalue()
 
         # Write to pod storage.
+        __FEATURE__.new_pod(this_pid, this_pod_bytes)
         writer.write_pod(this_pid, this_pod_bytes)
         ctx.dependency_maps[this_pid] = this_pickler.get_root_dep()
 
@@ -526,6 +535,7 @@ class StaticPodPickling(PodPickling):
         self.pickle_kwargs = pickle_kwargs
 
     def dump(self, obj: Object) -> PodId:
+        __FEATURE__.new_dump()
         tid = step_time_id()
         pid = make_pod_id(tid, object_id(obj))
         ctx = StaticPodPicklerContext.new(obj)
