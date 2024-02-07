@@ -411,7 +411,6 @@ class StaticPodPickler(BaseStaticPodPickler):
 
         pod_action = self.safe_podding_fn(obj)
         if pod_action == PodAction.bundle:
-            __FEATURE__.new_pod_oid(self.root_pid, id(obj))
             return None
 
         # Split and split final.
@@ -439,6 +438,8 @@ class StaticPodPickler(BaseStaticPodPickler):
                 self.ctx.cached_pod_actions[oid] = PodAction.bundle
             else:
                 self.ctx.cached_pod_actions[oid] = self.ctx.podding_fn(obj, self)
+                if self.ctx.cached_pod_actions[oid] == PodAction.bundle:
+                    __FEATURE__.new_pod_oid(self.root_pid, id(obj))
         return self.ctx.cached_pod_actions[oid]
 
     def get_root_dep(self) -> PodDependency:
