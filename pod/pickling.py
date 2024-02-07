@@ -190,6 +190,9 @@ class PodAction(enum.Enum):
     split_final = "split_final"
 
 
+PoddingFunction = Callable[[Object, BasePickler], PodAction]
+
+
 class ManualPodding:
     BUNDLE_TYPES = (
         # Constant/small size.
@@ -234,7 +237,7 @@ class ManualPodding:
     }
 
     @staticmethod
-    def podding_fn(obj: Object) -> PodAction:
+    def podding_fn(obj: Object, pickler: BasePickler) -> PodAction:
         if isinstance(obj, ManualPodding.BUNDLE_TYPES):
             return PodAction.bundle
 
@@ -246,9 +249,9 @@ class ManualPodding:
 
         # Decide whether to split.
         if is_split:
+            if is_split_final:
+                return PodAction.split_final
             return PodAction.split
-        elif is_split_final:
-            return PodAction.split_final
         else:
             return PodAction.bundle
 
@@ -259,7 +262,7 @@ class StaticPodPicklerContext:
     dependency_maps: Dict[PodId, PodDependency]
     memo: StaticPodPicklerMemo
     cached_pod_actions: Dict[ObjectId, PodAction]
-    podding_fn: Callable[[ObjectId], PodAction]
+    podding_fn: PoddingFunction
 
     @staticmethod
     def new(obj: Object) -> StaticPodPicklerContext:
@@ -349,6 +352,7 @@ class FinalPodPickler(BaseStaticPodPickler):
         pickle_kwargs: Dict[str, Any] = {},
     ) -> None:
         BaseStaticPodPickler.__init__(self, file, **pickle_kwargs)
+        self.root_pid = root_pid
         self.memo = ctx.memo.next_view(root_pid)
         self.root_rank = next_rank()
 
@@ -434,7 +438,7 @@ class StaticPodPickler(BaseStaticPodPickler):
                 # Not yet seen by persistent_id but by memoize, this object has been saved in final pickle.
                 self.ctx.cached_pod_actions[oid] = PodAction.bundle
             else:
-                self.ctx.cached_pod_actions[oid] = self.ctx.podding_fn(obj)
+                self.ctx.cached_pod_actions[oid] = self.ctx.podding_fn(obj, self)
         return self.ctx.cached_pod_actions[oid]
 
     def get_root_dep(self) -> PodDependency:
