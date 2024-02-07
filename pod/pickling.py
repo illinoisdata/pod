@@ -191,6 +191,7 @@ class PodAction(enum.Enum):
 
 
 PoddingFunction = Callable[[Object, BasePickler], PodAction]
+PostPoddingFunction = Callable[[], None]
 
 
 class ManualPodding:
@@ -394,6 +395,7 @@ class StaticPodPickler(BaseStaticPodPickler):
         self.root_rank = next_rank()
         self.ctx = ctx
         self.writer = writer
+        self.file = file
         self.pickle_kwargs = pickle_kwargs
 
         # Replace memo with virtual view memo.
@@ -532,11 +534,13 @@ class StaticPodPickling(PodPickling):
     def __init__(
         self,
         storage: PodStorage,
-        podding_fn: Optional[Callable[[Object], PodAction]] = None,
+        podding_fn: Optional[PoddingFunction] = None,
+        post_podding_fn: Optional[PostPoddingFunction] = None,
         pickle_kwargs: Dict[str, Any] = {},
     ) -> None:
         self.storage = storage
         self.podding_fn = podding_fn
+        self.post_podding_fn = post_podding_fn
         self.pickle_kwargs = pickle_kwargs
 
     def dump(self, obj: Object) -> PodId:
@@ -554,6 +558,8 @@ class StaticPodPickling(PodPickling):
                 # pod_pickling_stat.fill_dep(pod_id, ctx.dependency_maps)  # stat_staticppick
             # pod_pickling_stat.summary()  # stat_staticppick
 
+        if self.post_podding_fn is not None:
+            self.post_podding_fn()
         return pid
 
     def load(self, pid: PodId) -> Object:

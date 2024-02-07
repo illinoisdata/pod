@@ -23,39 +23,59 @@ class ChangeTracker:
         self._prev_pod_set: Set[bytes] = set()
         self._pod_set: Set[bytes] = set()
         self._pod_oids: Dict[PodId, Set[ObjectId]] = {}
+        self._pod_max_change_prob: Dict[PodId, float] = {}
+        self._oid_recent_change: Set[ObjectId] = set()
 
         self._oid_count: Dict[ObjectId, int] = {}
-        self._oid_stable_count: Dict[ObjectId, int] = {}
+        self._oid_change_count: Dict[ObjectId, int] = {}
 
     def new_dump(self):
         self._prev_pod_set = self._pod_set
         self._pod_set = set()
         self._pod_oids = {}
+        self._oid_recent_change = set()
+        self._pod_max_change_prob = {}
 
     def new_pod_oid(self, pid: PodId, oid: ObjectId):
         if pid not in self._pod_oids:
             self._pod_oids[pid] = set()
         self._pod_oids[pid].add(oid)
+        self._pod_max_change_prob[pid] = max(
+            self._pod_max_change_prob.get(pid, 0.0),
+            self.oid_change_prob(oid),
+        )
 
     def new_pod(self, pid: PodId, pod_bytes: bytes):
         self._pod_set.add(pod_bytes)
+        is_changed = pod_bytes not in self._prev_pod_set
         for oid in self._pod_oids[pid]:
             if oid not in self._oid_count:
                 self._oid_count[oid] = 0
-                self._oid_stable_count[oid] = 0
+                self._oid_change_count[oid] = 0
             self._oid_count[oid] += 1
-            self._oid_stable_count[oid] += 1 if pod_bytes in self._prev_pod_set else 0
+            if is_changed:
+                self._oid_change_count[oid] += 1
+                self._oid_recent_change.add(oid)
+
+    def pod_max_change_prob(self, pid: PodId) -> float:
+        return self._pod_max_change_prob.get(pid, 0.0)
 
     def oid_count(self, oid: ObjectId) -> int:
         return self._oid_count.get(oid, 0)
 
-    def oid_stable_count(self, oid: ObjectId) -> int:
-        return self._oid_stable_count.get(oid, 0)
+    def oid_change_count(self, oid: ObjectId) -> int:
+        return self._oid_change_count.get(oid, 0)
+
+    def oid_change_prob(self, oid: ObjectId) -> float:
+        return self._oid_change_count[oid] / self._oid_count[oid] if oid in self._oid_count else 0.0
 
     def change_probs_hist(self, bins=10) -> Tuple[List[int], List[float]]:
-        change_probs = [(self._oid_count[oid] - self._oid_stable_count[oid]) / self._oid_count[oid] for oid in self._oid_count]
+        change_probs = [self._oid_change_count[oid] / self._oid_count[oid] for oid in self._oid_count]
         counts, bin_lowers = np.histogram(change_probs, bins=10, range=(0, 1))
         return list(counts), list(bin_lowers)
+
+    def has_changed(self, oid: ObjectId) -> bool:
+        return oid in self._oid_recent_change
 
 
 class _Feature:
@@ -110,21 +130,39 @@ class _Feature:
     """ Feature retrieval. """
 
     @when_enabled
+    def pod_max_change_prob(self, pid: PodId) -> Optional[float]:
+        if self.cfg.get("track_change"):
+            return self._track_change.pod_max_change_prob(pid)
+        return None
+
+    @when_enabled
     def oid_count(self, oid: ObjectId) -> Optional[int]:
         if self.cfg.get("track_change"):
             return self._track_change.oid_count(oid)
         return None
 
     @when_enabled
-    def oid_stable_count(self, oid: ObjectId) -> Optional[int]:
+    def oid_change_count(self, oid: ObjectId) -> Optional[int]:
         if self.cfg.get("track_change"):
-            return self._track_change.oid_stable_count(oid)
+            return self._track_change.oid_change_count(oid)
+        return None
+
+    @when_enabled
+    def oid_change_prob(self, oid: ObjectId) -> Optional[float]:
+        if self.cfg.get("track_change"):
+            return self._track_change.oid_change_prob(oid)
         return None
 
     @when_enabled
     def change_probs_hist(self, bins=10) -> Optional[Tuple[List[int], List[float]]]:
         if self.cfg.get("track_change"):
             return self._track_change.change_probs_hist(bins=bins)
+        return None
+
+    @when_enabled
+    def has_changed(self, oid: ObjectId) -> Optional[bool]:
+        if self.cfg.get("track_change"):
+            return self._track_change.has_changed(oid)
         return None
 
 
@@ -146,6 +184,6 @@ if __name__ == "__main__":
         __FEATURE__.new_pod(PodId(1, 1), b"123")
         __FEATURE__.new_pod_oid(PodId(1, 2), 2)
         __FEATURE__.new_pod(PodId(1, 2), b"3")
-        print(f"{__FEATURE__.oid_stable_count(1)} / {__FEATURE__.oid_count(1)}")
-        print(f"{__FEATURE__.oid_stable_count(2)} / {__FEATURE__.oid_count(2)}")
+        print(f"{__FEATURE__.oid_change_count(1)} / {__FEATURE__.oid_count(1)}")
+        print(f"{__FEATURE__.oid_change_count(2)} / {__FEATURE__.oid_count(2)}")
     print(__FEATURE__.is_enabled())
