@@ -16,7 +16,16 @@ import simple_parsing
 from loguru import logger
 
 from pod.common import PodId
-from pod.pickling import PodPickling, SnapshotPodPickling, StaticPodPickling
+from pod.feature import __FEATURE__
+from pod.model import FeatureCollectorModel, RandomPoddingModel
+from pod.pickling import (
+    ManualPodding,
+    PoddingFunction,
+    PodPickling,
+    PostPoddingFunction,
+    SnapshotPodPickling,
+    StaticPodPickling,
+)
 from pod.stats import ExpStat
 from pod.storage import DictPodStorage, FilePodStorage, MongoPodStorage, Neo4jPodStorage, PostgreSQLPodStorage, RedisPodStorage
 
@@ -59,6 +68,11 @@ class BenchArgs:
     neo4j_database: Optional[str] = None  # Database name to store pod data.
     mongo_hostname: str = "localhost"  # Hostname where MongoDB server is running.
     mongo_port: int = 27017  # Port on the hostname where MongoDB server is running.
+
+    """ Learning, model, feature """
+    podding_model: str = "manual"  # Model name to use for podding function.
+    enable_feature: bool = False  # Whether to enable feature extraction
+    collect_path: Optional[Path] = None  # CSV path to save feature collection
 
 
 """ Notebook handler/executor """
@@ -193,19 +207,38 @@ class BlockTimeout:
 
 class SUT:
     @staticmethod
+    def podding_model(args: BenchArgs) -> Tuple[PoddingFunction, Optional[PostPoddingFunction]]:
+        if args.podding_model == "manual":
+            return ManualPodding.podding_fn, None
+        elif args.podding_model == "random":
+            return RandomPoddingModel().podding_fn, None
+        elif args.podding_model == "manual-collect":
+            assert args.collect_path is not None, "*-collect requires --collect_path"
+            model = FeatureCollectorModel(args.collect_path, ManualPodding.podding_fn)
+            return model.podding_fn, model.post_podding_fn
+        raise ValueError(f'Invalid model name "{args.podding_model}"')
+
+    @staticmethod
     def sut(args: BenchArgs) -> PodPickling:
+        podding_fn, post_podding_fn = SUT.podding_model(args)
         if args.sut == "inmem_dict":
-            return StaticPodPickling(DictPodStorage())
+            return StaticPodPickling(DictPodStorage(), podding_fn=podding_fn, post_podding_fn=post_podding_fn)
         elif args.sut == "snapshot":
             assert args.pod_dir is not None, "snapshot requires --pod_dir"
             return SnapshotPodPickling(args.pod_dir)
         elif args.sut == "pod_file":
             assert args.pod_dir is not None, "pod_file requires --pod_dir"
-            return StaticPodPickling(FilePodStorage(args.pod_dir))
+            return StaticPodPickling(FilePodStorage(args.pod_dir), podding_fn=podding_fn, post_podding_fn=post_podding_fn)
         elif args.sut == "pod_psql":
-            return StaticPodPickling(PostgreSQLPodStorage(args.psql_hostname, args.psql_port))
+            return StaticPodPickling(
+                PostgreSQLPodStorage(args.psql_hostname, args.psql_port),
+                podding_fn=podding_fn,
+                post_podding_fn=post_podding_fn,
+            )
         elif args.sut == "pod_redis":
-            return StaticPodPickling(RedisPodStorage(args.redis_hostname, args.redis_port))
+            return StaticPodPickling(
+                RedisPodStorage(args.redis_hostname, args.redis_port), podding_fn=podding_fn, post_podding_fn=post_podding_fn
+            )
         elif args.sut == "pod_neo4j":
             return StaticPodPickling(
                 Neo4jPodStorage(
@@ -213,24 +246,24 @@ class SUT:
                     args.neo4j_port,
                     args.neo4j_password,
                     database=args.neo4j_database,
-                )
+                ),
+                podding_fn=podding_fn,
+                post_podding_fn=post_podding_fn,
             )
         elif args.sut == "pod_mongo":
-            return StaticPodPickling(MongoPodStorage(args.mongo_hostname, args.mongo_port))
+            return StaticPodPickling(
+                MongoPodStorage(args.mongo_hostname, args.mongo_port), podding_fn=podding_fn, post_podding_fn=post_podding_fn
+            )
         raise ValueError(f'Invalid SUT name "{args.sut}"')
 
 
 """ Main procedures """
 
 
-def run_exp1(argv: List[str]) -> None:
-    """Dumps and loads"""
-
-    # Parse arguments.
-    args = simple_parsing.parse(BenchArgs, args=argv)
+def run_exp1_impl(args: BenchArgs) -> None:
+    # Setup random state.
     random.seed(args.seed)
     np.random.seed(args.seed)
-    logger.info(args)
 
     # Load notebook.
     nb_cells = Notebooks.nb(args)
@@ -289,6 +322,19 @@ def run_exp1(argv: List[str]) -> None:
     # Write results
     result_path = expstat.save(args.result_dir / args.expname)
     logger.info(f"Saved ExpStat to {result_path}")
+
+
+def run_exp1(argv: List[str]) -> None:
+    # Parse arguments.
+    args = simple_parsing.parse(BenchArgs, args=argv)
+    logger.info(args)
+
+    # Setup learning if needed.
+    if args.enable_feature:
+        with __FEATURE__:
+            run_exp1_impl(args)
+    else:
+        run_exp1_impl(args)
 
 
 if __name__ == "__main__":
