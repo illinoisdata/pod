@@ -72,7 +72,6 @@ class BenchArgs:
     """ Learning, model, feature """
     podding_model: str = "manual"  # Model name to use for podding function.
     enable_feature: bool = False  # Whether to enable feature extraction
-    collect_path: Optional[Path] = None  # CSV path to save feature collection
 
 
 """ Notebook handler/executor """
@@ -213,8 +212,7 @@ class SUT:
         elif args.podding_model == "random":
             return RandomPoddingModel().podding_fn, None
         elif args.podding_model == "manual-collect":
-            assert args.collect_path is not None, "*-collect requires --collect_path"
-            model = FeatureCollectorModel(args.collect_path, ManualPodding.podding_fn)
+            model = FeatureCollectorModel(args.result_dir / args.expname / "manual-collect.csv", ManualPodding.podding_fn)
             return model.podding_fn, model.post_podding_fn
         raise ValueError(f'Invalid model name "{args.podding_model}"')
 
