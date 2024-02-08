@@ -50,6 +50,7 @@ SUTS=(
     "prd"
     "pnj"
     "pmg"
+    "pflc"
 )
 
 function get_sut_args() {
@@ -76,8 +77,11 @@ function get_sut_args() {
     elif [[ $_SUT == "pmg" ]]
     then
         sut_args="--sut pod_mongo --mongo_hostname podmongo --mongo_port 27017"
+    elif [[ $_SUT == "pflc" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --enable_feature --podding_model manual-collect"
     else
-        echo "ERROR: Invalid SUT $_SUT from [ ${SUTS[*]} ]"
+        echo "ERROR (get_sut_args): Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
     fi
     eval $retVal="'${sut_args}'"
@@ -117,8 +121,11 @@ function prepare_sut() {
     then
         echo "mongo \"db.dropDatabase();\""
         mongosh pod --host podmongo --port 27017 --eval "db.dropDatabase();"
+    elif [[ $_SUT == "pflc" ]]
+    then
+        rm -r ${POD_DIR}
     else
-        echo "ERROR: Invalid SUT $_SUT from [ ${SUTS[*]} ]"
+        echo "ERROR (prepare_sut): Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
     fi
     return 0
