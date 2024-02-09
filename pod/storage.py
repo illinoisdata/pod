@@ -1061,6 +1061,7 @@ class Neo4jPodStorageReader(PodReader):
     def __init__(self, storage: Neo4jPodStorage, hint_pod_ids: List[PodId], cache: Dict[bytes, bytes]) -> None:
         self.storage = storage
         self.hint_pod_ids = hint_pod_ids
+        self.cache = cache
 
     def read(self, pod_id: PodId) -> io.IOBase:
         serialized_pod_id = serialize_pod_id(pod_id)
@@ -1111,7 +1112,7 @@ class Neo4jPodStorage(PodStorage):
                 if pod_bytes:
                     cache[pid] = pod_bytes
 
-        return Neo4jPodStorageReader(self, hint_pod_ids)
+        return Neo4jPodStorageReader(self, hint_pod_ids, cache)
 
     def estimate_size(self) -> int:
         """Gets size of all files in used neo4j database"""
@@ -1326,7 +1327,7 @@ class MongoPodStorage(PodStorage):
                 }
             },
         ]
-        all_pod_ids = self.db.pod_dependencies.aggregate(pipeline, allowDiskUse=True)
+        all_pod_ids = self.db.pod_dependencies.aggregate(pipeline, allowDiskUse=True)  # type: ignore
         original_pod_ids = []
         pod_ids_to_fetch = []
         for row in all_pod_ids:
