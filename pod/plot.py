@@ -177,6 +177,7 @@ def plot_exp1batch(argv: List[str]) -> None:
         ax.set_xlabel("Dump Latency (s)")
         ax.minorticks_on()
         ax.yaxis.set_tick_params(which="minor", bottom=False)
+        ax.set_xlim(left=0)
         ax.set_title(f"{single.name}")
 
         # Plot load time.
@@ -185,6 +186,7 @@ def plot_exp1batch(argv: List[str]) -> None:
         ax.set_xlabel("Load Latency (s)")
         ax.minorticks_on()
         ax.yaxis.set_tick_params(which="minor", bottom=False)
+        ax.set_xlim(left=0)
 
         # Plot dump stroage increments.
         ax = axs[2]
@@ -194,6 +196,7 @@ def plot_exp1batch(argv: List[str]) -> None:
         ax.set_yticklabels(labels)
         ax.minorticks_on()
         ax.yaxis.set_tick_params(which="minor", bottom=False)
+        ax.set_xlim(left=0)
 
         # Plot dump stroage increments.
         ax = axs[3]
@@ -201,6 +204,7 @@ def plot_exp1batch(argv: List[str]) -> None:
         ax.set_xlabel("Storage inc. (GB)")
         ax.minorticks_on()
         ax.yaxis.set_tick_params(which="minor", bottom=False)
+        ax.set_xlim(left=0)
 
     for ax in axes.flatten():
         set_fontsize(ax, 7, 5)
