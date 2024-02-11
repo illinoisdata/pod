@@ -138,8 +138,8 @@ class StaticPodPicklerMemoView:
     def __contains__(self, obj_id: ObjectId) -> bool:
         return obj_id in self.memo
 
-    def get(self, obj_id: ObjectId) -> Optional[Tuple[MemoId, Object]]:
-        return self[obj_id] if obj_id in self.memo else None
+    def get(self, obj_id: ObjectId, default: Object = None) -> Optional[Tuple[MemoId, Object]]:
+        return self[obj_id] if obj_id in self.memo else default
 
     def get_dep_pids(self) -> Set[PodId]:
         return self.dep_pids
@@ -292,7 +292,7 @@ class StaticPodPicklingMetadata:
         pickler: BasePickler,
     ) -> StaticPodPicklingMetadata:
         return StaticPodPicklingMetadata(
-            root_memo_id=pickler.memo[id(obj)][0],
+            root_memo_id=pickler.memo.get(id(obj), (2**32, obj))[0],
             memo_page_offsets=pickler.memo.page_offsets,
         )
 
@@ -467,13 +467,22 @@ class StaticPodPickler(BaseStaticPodPickler):
             else StaticPodPickler(this_obj, this_pid, ctx, writer, this_buffer, pickle_kwargs)
         )
         this_pickler.dump(this_obj)
-        StaticPodPicklingMetadata.new(obj=this_obj, pickler=this_pickler).write(this_buffer)
+
+        # Add in metadata.
+        this_metadata = StaticPodPicklingMetadata.new(obj=this_obj, pickler=this_pickler)
+        this_metadata.write(this_buffer)
+
+        # Get the complete pod bytes.
         this_pod_bytes = this_buffer.getvalue()
 
         # Write to pod storage.
         __FEATURE__.new_pod(this_pid, this_pod_bytes)
         writer.write_pod(this_pid, this_pod_bytes)
         ctx.dependency_maps[this_pid] = this_pickler.get_root_dep()
+
+        assert (
+            this_metadata.root_memo_id != 2**32 or len(ctx.dependency_maps[this_pid].dep_pids) == 0
+        ), "Missing root memo ID and potentially contains a self-reference"
 
         # pod_pickling_stat.append(this_pid, this_obj, this_pod_bytes)  # stat_staticppick
 
