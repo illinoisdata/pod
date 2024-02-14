@@ -25,11 +25,28 @@ from pod.feature import __FEATURE__
 from pod.storage import PodReader, PodStorage, PodWriter
 
 
+class PodPicklingDumpSession:
+    def __enter__(self) -> PodPicklingDumpSession:
+        return self
+
+    def dump(self, pid: PodId, obj: Object) -> None:
+        raise NotImplementedError("Abstract method")
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        pass
+
+
 class PodPickling:
     def dump(self, obj: Object) -> PodId:
         raise NotImplementedError("Abstract method")
 
+    def dump_batch(self, pods: Dict[PodId, Object]) -> PodPicklingDumpSession:
+        raise NotImplementedError("Abstract method")
+
     def load(self, pid: PodId) -> Object:
+        raise NotImplementedError("Abstract method")
+
+    def load_batch(self, pids: Set[PodId]) -> Dict[PodId, Object]:
         raise NotImplementedError("Abstract method")
 
     def estimate_size(self) -> int:
@@ -259,6 +276,7 @@ class ManualPodding:
 
 @dataclass
 class StaticPodPicklerContext:
+    root_oids: Set[ObjectId]
     seen_oid: Set[ObjectId]
     dependency_maps: Dict[PodId, PodDependency]
     memo: StaticPodPicklerMemo
@@ -266,10 +284,11 @@ class StaticPodPicklerContext:
     podding_fn: PoddingFunction
 
     @staticmethod
-    def new(obj: Object) -> StaticPodPicklerContext:
-        seen_oid = {object_id(obj)}
+    def new(root_pods: Dict[PodId, Object]) -> StaticPodPicklerContext:
+        root_oids = {object_id(obj) for pid, obj in root_pods.items()}
         return StaticPodPicklerContext(
-            seen_oid=seen_oid,
+            root_oids=root_oids,
+            seen_oid=set(),
             dependency_maps={},
             memo=StaticPodPicklerMemo(),
             cached_pod_actions={},
@@ -406,7 +425,7 @@ class StaticPodPickler(BaseStaticPodPickler):
             # Always bundle root object, otherwise infinite recursion.
             __FEATURE__.new_pod_oid(self.root_pid, id(obj))
             return None
-        if isinstance(obj, StaticPodPickler.MUST_BUNDLE_TYPES):
+        if id(obj) not in self.ctx.root_oids and isinstance(obj, StaticPodPickler.MUST_BUNDLE_TYPES):
             # Always bundle these types without checking the action cache.
             # __FEATURE__.new_pod_oid(self.root_pid, id(obj))
             return None
@@ -459,6 +478,9 @@ class StaticPodPickler(BaseStaticPodPickler):
         is_final: bool = False,
         pickle_kwargs: Dict[str, Any] = {},
     ) -> None:
+        # Now we have seen this object ID.
+        ctx.seen_oid.add(this_pid.oid)
+
         # Pickle this object into a new buffer.
         this_buffer = io.BytesIO()
         this_pickler = (
@@ -539,6 +561,43 @@ class StaticPodUnpickler(BaseUnpickler):
         return self.memo[self.meta.root_memo_id]
 
 
+class StaticPodPicklingDumpSession(PodPicklingDumpSession):
+    def __init__(self, pickling: StaticPodPickling, ctx: StaticPodPicklerContext) -> None:
+        self.pickling = pickling
+        self.ctx = ctx
+
+        self.writer: Optional[PodWriter] = None
+
+    def __enter__(self) -> StaticPodPicklingDumpSession:
+        __FEATURE__.new_dump()
+        self.writer = self.pickling.storage.writer().__enter__()
+        return self
+
+    def dump(self, pid: PodId, obj: Object) -> None:
+        assert self.writer is not None
+        if object_id(obj) not in self.ctx.seen_oid:
+            StaticPodPickler.dump_and_pod_write(
+                obj,
+                pid,
+                self.ctx,
+                self.writer,
+                pickle_kwargs=self.pickling.pickle_kwargs,
+            )
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        assert self.writer is not None
+        for pod_id, deps in self.ctx.dependency_maps.items():
+            self.writer.write_dep(pod_id, deps)
+            # pod_pickling_stat.fill_dep(pod_id, self.ctx.dependency_maps)  # stat_staticppick
+        # pod_pickling_stat.summary()  # stat_staticppick
+
+        self.writer.__exit__(exc_type, exc_val, exc_tb)
+        self.writer = None
+
+        if self.pickling.post_podding_fn is not None:
+            self.pickling.post_podding_fn()
+
+
 class StaticPodPickling(PodPickling):
     def __init__(
         self,
@@ -553,34 +612,35 @@ class StaticPodPickling(PodPickling):
         self.pickle_kwargs = pickle_kwargs
 
     def dump(self, obj: Object) -> PodId:
-        __FEATURE__.new_dump()
         tid = step_time_id()
         pid = make_pod_id(tid, object_id(obj))
-        ctx = StaticPodPicklerContext.new(obj)
-        if self.podding_fn is not None:
-            ctx.podding_fn = self.podding_fn
-
-        with self.storage.writer() as writer:
-            StaticPodPickler.dump_and_pod_write(obj, pid, ctx, writer, pickle_kwargs=self.pickle_kwargs)
-            for pod_id, deps in ctx.dependency_maps.items():
-                writer.write_dep(pod_id, deps)
-                # pod_pickling_stat.fill_dep(pod_id, ctx.dependency_maps)  # stat_staticppick
-            # pod_pickling_stat.summary()  # stat_staticppick
-
-        if self.post_podding_fn is not None:
-            self.post_podding_fn()
+        with self.dump_batch({pid: obj}) as session:
+            session.dump(pid, obj)
         return pid
 
+    def dump_batch(self, pods: Dict[PodId, Object]) -> PodPicklingDumpSession:
+        ctx = StaticPodPicklerContext.new(pods)
+        if self.podding_fn is not None:
+            ctx.podding_fn = self.podding_fn
+        return StaticPodPicklingDumpSession(self, ctx)
+
     def load(self, pid: PodId) -> Object:
-        with self.storage.reader([pid]) as reader:
-            ctx = StaticPodUnpicklerContext(
-                tid=pid.tid,
-                reader=reader,
-                loaded_objs={},
-                unpickler_by_oid={},
-                memo=StaticPodUnpicklerMemo(),
-            )
+        return self.load_batch({pid})[pid]
+
+    def load_batch(self, pids: Set[PodId]) -> Dict[PodId, Object]:
+        with self.storage.reader(list(pids)) as reader:
+            ctx_by_tid = {
+                tid: StaticPodUnpicklerContext(
+                    tid=tid,
+                    reader=reader,
+                    loaded_objs={},
+                    unpickler_by_oid={},
+                    memo=StaticPodUnpicklerMemo(),
+                )
+                for tid in set(pid.tid for pid in pids)
+            }
             for this_pid in reader.dep_pids_by_rank():
+                ctx = ctx_by_tid[this_pid.tid]
                 if this_pid.oid not in ctx.loaded_objs:
                     with reader.read(this_pid) as obj_io:
                         ctx.loaded_objs[this_pid.oid] = StaticPodUnpickler(
@@ -589,7 +649,7 @@ class StaticPodPickling(PodPickling):
                             obj_io,
                             **self.pickle_kwargs,
                         ).load()
-            return ctx.loaded_objs[pid.oid]
+            return {pid: ctx_by_tid[pid.tid].loaded_objs[pid.oid] for pid in pids}
 
     def estimate_size(self) -> int:
         return self.storage.estimate_size()

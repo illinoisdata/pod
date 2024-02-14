@@ -15,7 +15,8 @@ import numpy as np
 import simple_parsing
 from loguru import logger
 
-from pod.common import PodId
+from pod._pod import Pod
+from pod.common import TimeId
 from pod.feature import __FEATURE__
 from pod.model import FeatureCollectorModel, RandomPoddingModel
 from pod.pickling import (
@@ -217,7 +218,7 @@ class SUT:
         raise ValueError(f'Invalid model name "{args.podding_model}"')
 
     @staticmethod
-    def sut(args: BenchArgs) -> PodPickling:
+    def pickling(args: BenchArgs) -> PodPickling:
         podding_fn, post_podding_fn = SUT.podding_model(args)
         if args.sut == "inmem_dict":
             return StaticPodPickling(DictPodStorage(), podding_fn=podding_fn, post_podding_fn=post_podding_fn)
@@ -254,6 +255,11 @@ class SUT:
             )
         raise ValueError(f'Invalid SUT name "{args.sut}"')
 
+    @staticmethod
+    def sut(args: BenchArgs) -> Pod:
+        pickling = SUT.pickling(args)
+        return Pod(pickling)
+
 
 """ Main procedures """
 
@@ -272,15 +278,15 @@ def run_exp1_impl(args: BenchArgs) -> None:
 
     # Dumps all steps.
     expstat = ExpStat()
-    pids: List[PodId] = []
+    tids: List[TimeId] = []
     for nth, (cell, the_globals, the_locals) in enumerate(nb_exec.iter()):
         # Dump current state.
         dump_start_ts = time.time()
-        pid = sut.dump(the_locals)
+        tid = sut.save(the_locals)
         dump_stop_ts = time.time()
 
         # Record measurements.
-        pids.append(pid)
+        tids.append(tid)
         expstat.add_dump(
             nth=nth,
             time_s=dump_stop_ts - dump_start_ts,
@@ -289,19 +295,19 @@ def run_exp1_impl(args: BenchArgs) -> None:
 
         # Reset environment to reduce noise.
         gc.collect()
-    logger.info(f"Collected pids {pids}")
+    logger.info(f"Collected tids {tids}")
 
     # Save partial results (in case of load failure).
     result_path = expstat.save(args.result_dir / args.expname)
     logger.info(f"Saved ExpStat (dump only) to {result_path}")
 
     # Load random steps.
-    for nth, idx in enumerate(random.choices(range(len(pids)), k=args.exp1_num_loads)):
+    for nth, idx in enumerate(random.choices(range(len(tids)), k=args.exp1_num_loads)):
         # Load state.
         load_start_ts = time.time()
         try:
             with BlockTimeout(60):
-                the_locals = sut.load(pids[idx])
+                the_locals = sut.load(tids[idx])
         except TimeoutError as e:
             logger.warning(f"{e}")
         load_stop_ts = time.time()
