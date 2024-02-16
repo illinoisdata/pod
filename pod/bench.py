@@ -136,6 +136,7 @@ class RandomMutatingListCells(NotebookCells):
                 "  def g():\n"
                 "    return 0\n"
                 "  return 0\n"
+                f"lc = secrets.token_bytes({self.list_size} * {self.elem_size})\n"
                 "l = [\n"
                 f"  secrets.token_bytes({self.elem_size})\n"
                 f"  for idx in range({self.list_size})\n"
@@ -169,9 +170,9 @@ class Notebooks:
 
 
 class NotebookExecutor:
-    def __init__(self, cells: NotebookCells) -> None:
+    def __init__(self, cells: NotebookCells, the_locals: dict = {}) -> None:
         self.cells = cells
-        self.the_locals: dict = {}
+        self.the_locals: dict = the_locals
         self.the_globals: dict = self.the_locals
         self.the_globals["__spec__"] = None
         self.the_globals["__builtins__"] = globals()["__builtins__"]
@@ -269,12 +270,12 @@ def run_exp1_impl(args: BenchArgs) -> None:
     random.seed(args.seed)
     np.random.seed(args.seed)
 
-    # Load notebook.
-    nb_cells = Notebooks.nb(args)
-    nb_exec = NotebookExecutor(nb_cells)
-
     # Setup storage system under test.
     sut = SUT.sut(args)
+
+    # Load notebook.
+    nb_cells = Notebooks.nb(args)
+    nb_exec = NotebookExecutor(nb_cells, the_locals=sut.new_managed_namespace())
 
     # Dumps all steps.
     expstat = ExpStat()
