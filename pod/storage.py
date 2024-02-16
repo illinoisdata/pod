@@ -236,6 +236,8 @@ class FilePodStorageWriter(PodWriter):
             self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
 
             # Write to buffer.
+            if self.pod_page_buffer_size > 0 and self.pod_page_buffer_size + len(pod_bytes) > FilePodStorageWriter.FLUSH_SIZE:
+                self.flush_pod()  # Flush smaller buffer first, before combining with the larger object.
             self.pod_page_buffer[pod_id] = pod_bytes
             self.pod_page_buffer_size += len(pod_bytes)
             if self.pod_page_buffer_size > FilePodStorageWriter.FLUSH_SIZE:
