@@ -56,6 +56,15 @@ class PodPickling:
 """ Snapshot: pickling object as a whole """
 
 
+class SnapshotPodPicklingDumpSession(PodPicklingDumpSession):
+    def __init__(self, pickling: SnapshotPodPickling) -> None:
+        self.pickling = pickling
+
+    def dump(self, pid: PodId, obj: Object) -> None:
+        with open(self.pickling.pickle_path(pid), "wb") as f:
+            pickle.dump(obj, f)
+
+
 class SnapshotPodPickling(PodPickling):
     def __init__(self, root_dir: Path) -> None:
         self.root_dir = root_dir
@@ -68,9 +77,15 @@ class SnapshotPodPickling(PodPickling):
             pickle.dump(obj, f)
         return pid
 
+    def dump_batch(self, pods: Dict[PodId, Object]) -> PodPicklingDumpSession:
+        return SnapshotPodPicklingDumpSession(self)
+
     def load(self, pid: PodId) -> Object:
         with open(self.pickle_path(pid), "rb") as f:
             return pickle.load(f)
+
+    def load_batch(self, pids: Set[PodId]) -> Dict[PodId, Object]:
+        return {pid: self.load(pid) for pid in pids}
 
     def estimate_size(self) -> int:
         return sum(f.stat().st_size for f in self.root_dir.glob("**/*") if f.is_file())
