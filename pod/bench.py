@@ -15,7 +15,7 @@ import numpy as np
 import simple_parsing
 from loguru import logger
 
-from pod._pod import Pod
+from pod._pod import ObjectStorage, PodObjectStorage, SnapshotObjectStorage
 from pod.common import TimeId
 from pod.feature import __FEATURE__
 from pod.model import FeatureCollectorModel, RandomPoddingModel
@@ -257,9 +257,11 @@ class SUT:
         raise ValueError(f'Invalid SUT name "{args.sut}"')
 
     @staticmethod
-    def sut(args: BenchArgs) -> Pod:
+    def sut(args: BenchArgs) -> ObjectStorage:
         pickling = SUT.pickling(args)
-        return Pod(pickling)
+        if args.sut == "snapshot":
+            return SnapshotObjectStorage(pickling)
+        return PodObjectStorage(pickling)
 
 
 """ Main procedures """
