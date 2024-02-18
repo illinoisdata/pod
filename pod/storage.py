@@ -36,6 +36,32 @@ def deserialize_pod_id(serialized_pod_id: bytes) -> PodId:
     return pid
 
 
+# Union find with path compression.
+def union_find(pids: Set[PodId], deps: Dict[PodId, PodDependency]) -> Dict[PodId, PodId]:
+    # Filter out unrelated deps, assuming no edge between two tids.
+    related_tids = set(pid.tid for pid in pids)
+    deps = {pid: dep for pid, dep in deps.items() if pid.tid in related_tids}
+
+    # Path compression.
+    roots: Dict[PodId, PodId] = {}
+
+    def find_root(pid):
+        if roots.get(pid, pid) == pid:
+            return pid
+        roots[pid] = find_root(roots[pid])
+        return roots[pid]
+
+    # Union find iterations.
+    for pid, dep in deps.items():
+        for pid2 in dep.dep_pids:
+            root_pid = find_root(pid)
+            root_pid2 = find_root(pid2)
+            roots[root_pid2] = root_pid
+
+    # Filter out uninterested pids,
+    return {pid: find_root(pid) for pid in pids}
+
+
 class PodWriter:
     def __enter__(self) -> PodWriter:
         return self  # Optional: Allocate resources.
@@ -77,6 +103,9 @@ class PodStorage:
         raise NotImplementedError("Abstract method")
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
+        raise NotImplementedError("Abstract method")
+
+    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
         raise NotImplementedError("Abstract method")
 
     def estimate_size(self) -> int:
@@ -176,6 +205,9 @@ class DictPodStorage(PodStorage):
 
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
         return DictPodStorageReader(self, hint_pod_ids)
+
+    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
+        return union_find(pod_ids, self.deps)
 
     def estimate_size(self) -> int:
         # In memory size
@@ -367,6 +399,9 @@ class FilePodStorage(PodStorage):
                     seen_pid.add(dep_pid)
                     pid_queue.put(dep_pid)
         return FilePodStorageReader(self, seen_pid, page_idxs)
+
+    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
+        return union_find(pod_ids, self.deps)
 
     def estimate_size(self) -> int:
         return sum(f.stat().st_size for f in self.root_dir.glob("**/*") if f.is_file())

@@ -57,6 +57,7 @@ class SnapshotObjectStorage(ObjectStorage):
         return self._pickling.estimate_size()
 
 
+# TODO: Filter read-only variables in function scope dict better.
 class PodNamespace(dict):
     def __init__(self, *args, **kwargs) -> None:
         dict.__init__(self, *args, **kwargs)
@@ -69,13 +70,15 @@ class PodNamespace(dict):
 
     def __setitem__(self, name: str, obj: Object) -> None:
         self.active_names.add(name)
-        dict.__setitem__(self, name, obj)
+        return dict.__setitem__(self, name, obj)
 
     def __delitem__(self, name: str):
         self.active_names.discard(name)
+        return dict.__delitem__(self, name)
 
     def __iter__(self):
-        self.active_names = set(self.keys())
+        self.active_names = set(self.keys())  # TODO: Use enum for this.
+        return dict.__iter__(self)
 
     def pod_active_names(self) -> Set[str]:
         return self.active_names
@@ -131,7 +134,7 @@ class PodObjectStorage(ObjectStorage):
         namemap_pid = make_pod_id(tid, PodObjectStorage.NAMEMAP_OID)
 
         if isinstance(namespace, PodNamespace):
-            active_names = namespace.pod_active_names()  # TOFIX: Query connected component.
+            active_names = self._connected_active_names(tid, namespace)
             prev_namemap = namespace.pod_namemap()
             active_namemap = {
                 name: make_pod_id(tid, object_id(namespace[name])) for name, obj in namespace.items() if name in active_names
@@ -156,3 +159,19 @@ class PodObjectStorage(ObjectStorage):
     def _load_objects(self, namemap: Namemap) -> Namespace:
         obj_by_pid = self._pickling.load_batch({pid for name, pid in namemap.items()})
         return {name: obj_by_pid[pid] for name, pid in namemap.items()}
+
+    def _connected_active_names(self, tid: TimeId, namespace: PodNamespace) -> Set[str]:
+        active_names = namespace.pod_active_names()
+        prev_namemap = namespace.pod_namemap()
+
+        # Find union find roots of all pids.
+        prev_pids = {pid for _, pid in prev_namemap.items()}
+        connected_roots = self._pickling.connected_pods(prev_pids)
+
+        # Filter only pids that share root with active names.
+        active_roots = {connected_roots[prev_namemap[name]] for name in active_names if name in prev_namemap}
+        return {  # Get connected active names.
+            name
+            for name in namespace.keys()
+            if name not in prev_namemap or connected_roots[prev_namemap[name]] in active_roots
+        }
