@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 from dill import Pickler as BasePickler
 from dill import Unpickler as BaseUnpickler
+from loguru import logger
 
 from pod.common import Object, ObjectId, PodDependency, PodId, TimeId, make_pod_id, next_rank, object_id, step_time_id
 from pod.feature import __FEATURE__
@@ -47,6 +48,9 @@ class PodPickling:
         raise NotImplementedError("Abstract method")
 
     def load_batch(self, pids: Set[PodId]) -> Dict[PodId, Object]:
+        raise NotImplementedError("Abstract method")
+
+    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
         raise NotImplementedError("Abstract method")
 
     def estimate_size(self) -> int:
@@ -665,6 +669,14 @@ class StaticPodPickling(PodPickling):
                             **self.pickle_kwargs,
                         ).load()
             return {pid: ctx_by_tid[pid.tid].loaded_objs[pid.oid] for pid in pids}
+
+    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
+        try:
+            return self.storage.connected_pods(pod_ids)
+        except NotImplementedError:
+            logger.warning(f"{self.storage.__class__.__name__}::connected_pods is not implemented.")
+            common_pid = make_pod_id(-1, -1)  # Conservatively say that all pods are connected.
+            return {pid: common_pid for pid in pod_ids}
 
     def estimate_size(self) -> int:
         return self.storage.estimate_size()
