@@ -1,36 +1,61 @@
 from pod.bench import Notebooks, NotebookExecutor, BenchArgs
 from pod.pickling import StaticPodPickling
-from pod.storage import DictPodStorage
+from pod.storage import FilePodStorage
 from model import QLearningPoddingModel
 from pod.stats import ExpStat
 from pod.feature import __FEATURE__
 from typing import List
 import time
+from pathlib import Path
 from pod.common import PodId
 from loguru import logger
 import gc
-import random
+import sys
 import numpy as np
+import shutil
+import os
+from dataclasses import dataclass
+import simple_parsing
+from tqdm import tqdm
+from multiprocessing import Process, Queue
 
-def train(n_epochs, nbs):
+@dataclass
+class TrainArgs:
+    gamma: float
+    alpha: float
+
+
+# def train_notebook_iter(nb_path, q):
+
+def train(n_epochs, nbs, args: TrainArgs):
     """Trains model on n_epochs on nbs"""
     eps = 1.0
     eps_decay_factor = 0.9
+    try:
+        os.mkdir("qtables")
+    except FileExistsError:
+        pass
     with __FEATURE__:
-        model = QLearningPoddingModel(train=True)
-        for n in range(n_epochs):
-            print(f"EPOCH {n}")
+        save_file_str = (str(args.gamma) + "&" + str(args.alpha)).replace(".", "-")
+        model = QLearningPoddingModel(train=True, gamma=args.gamma, alpha=args.alpha)
+        for n in tqdm(range(n_epochs)):
             model.set_epsilon(eps)
             eps *= eps_decay_factor
             for nb_path in nbs:
+
                 args = BenchArgs(expname="", nb=nb_path, sut="inmem_dict")
                 # Load notebook.
                 nb_cells = Notebooks.nb(args=args)
                 nb_exec = NotebookExecutor(nb_cells)
 
-                # Initialize sut
-                sut = StaticPodPickling(DictPodStorage(), podding_fn=model.podding_fn, post_podding_fn=model.feature_collector.post_podding_fn(save=False))
+                pod_storage_path = Path(f"tmp/pod{save_file_str}")
+                if pod_storage_path.exists():
+                    shutil.rmtree(pod_storage_path)
 
+                # Initialize sut
+                sut = StaticPodPickling(FilePodStorage(Path(f"tmp/pod{save_file_str}")), podding_fn=model.podding_fn, post_podding_fn=model.post_podding_fn)
+                
+                last_storage_size = 0
                 expstat = ExpStat()
                 pids: List[PodId] = []
                 for nth, (cell, the_globals, the_locals) in enumerate(nb_exec.iter()):
@@ -40,52 +65,47 @@ def train(n_epochs, nbs):
                     dump_stop_ts = time.time()
 
                     # Record measurements.
+                    cur_size = sut.estimate_size()
                     pids.append(pid)
                     expstat.add_dump(
                         nth=nth,
                         time_s=dump_stop_ts - dump_start_ts,
-                        storage_b=sut.estimate_size(),
+                        storage_b=cur_size,
                     )
+
+                    # Rudimentary reward function based on dump time/storage size, this can be changed to include load time as well
+                    size = cur_size - last_storage_size
+                    dump_time = dump_stop_ts - dump_start_ts
+                    reward = -1000*dump_time + -1*size
+                    last_storage_size = cur_size
 
                     # Reset environment to reduce noise.
                     gc.collect()
-
-                    # Rudimentary reward function based on dump time/storage size, this can be changed to include load time as well
-                    size = sut.estimate_size()
-                    dump_time = dump_stop_ts - dump_start_ts
-                    reward = -1000*dump_time + -1*size
-                    print(f"SIZE {size}")
-                    print(f"TIME {dump_time}")
-                    print(f"REWARD {reward}")
 
                     # Updates Q values based on actions made for dumps
                     model.batch_update_q(reward=reward)
 
+                if "simple" not in nb_path:
+                    model.size_history.append(size)
+                    model.dump_time_history.append(dump_time)
                 logger.info(f"Collected pids {pids}")
-                
-                # Load random steps.
-                for nth, idx in enumerate(random.choices(range(len(pids)), k=10)):
-                    # Load state.
-                    load_start_ts = time.time()
-                    try:
-                        the_locals = sut.load(pids[idx])
-                    except TimeoutError as e:
-                        logger.warning(f"{e}")
-                    load_stop_ts = time.time()
-
-                    # Record measurements.
-                    expstat.add_load(
-                        nth=nth,
-                        time_s=load_stop_ts - load_start_ts,
-                    )
-
-                    # Reset environment to reduce noise.
-                    del the_locals
-                    gc.collect()
                 expstat.summary()
-                print("UNIQUE VALS")
-                print(np.unique(model.q_table, return_counts=True))
-        model.plot_rewards()
+                unique_vals,counts = np.unique(model.q_table, return_counts=True)
+                model.nnz_qtable.append(counts[-1])
+
+        # model.plot_stats(name=save_file_str)
+        # model.save_q_table(f"qtables/{save_file_str}.npy")
 
 if __name__ == "__main__":
-    train(5, ["notebooks/simple.ipynb", "rmlist"])
+    # logger.info(f"Arguments {sys.argv}")
+    if len(sys.argv) != 5:
+        logger.error("Usage --gamma <gamma> --alpha <alpha>")
+        sys.exit(2)
+    args = simple_parsing.parse(TrainArgs, args=sys.argv[1:])
+    # train(1, ["notebooks/simple.ipynb", "notebooks/04_training_linear_models.ipynb"], args) - goods
+    train(1, ["notebooks/twitter_networks.ipynb"], args)
+    train(1, ["notebooks/amex-dataset.ipynb"], args)
+    train(1, ["notebooks/better-xgb-baseline.ipynb"], args)
+    train(1, ["notebooks/it-s-that-time-of-the-year-again.ipynb"], args)
+    # train(1, [ "notebooks/sklearn_tweet_classification.ipynb"], args)
+   
