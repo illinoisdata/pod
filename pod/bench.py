@@ -30,6 +30,9 @@ from pod.pickling import (
 from pod.stats import ExpStat
 from pod.storage import DictPodStorage, FilePodStorage, MongoPodStorage, Neo4jPodStorage, PostgreSQLPodStorage, RedisPodStorage
 
+import pod.__pickle__  # noqa, isort:skip
+
+
 """ Parameters """
 
 """Examples:
