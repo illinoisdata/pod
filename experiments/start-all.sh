@@ -11,4 +11,5 @@ echo "Using COMPOSE_NAME= ${COMPOSE_NAME}"
 sleep 3
 
 docker build -t pod -f experiments/pod.Dockerfile . && \
+    docker build -t podnogil -f experiments/podnogil.Dockerfile . && \
     docker compose -f experiments/docker-compose.yml -p ${COMPOSE_NAME} up
