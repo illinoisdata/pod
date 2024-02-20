@@ -11,6 +11,17 @@ services:
     working_dir: /pod
     command: ["/bin/bash"]
 
+  podnogil:
+    image: podnogil
+    hostname: podnogil
+    tty: true
+    stdin_open: true
+    volumes:
+      - ${PWD}:/pod
+      - neo4j_data:/neo4j_data/data
+    working_dir: /pod
+    command: ["/bin/bash"]
+
   podpsql:
     image: postgres:16.1-bookworm
     hostname: podpsql

@@ -1,13 +1,27 @@
 FROM ubuntu:22.04
 
+WORKDIR /
 RUN apt-get update
 RUN apt-get upgrade --yes
 
 # Install tools
-RUN apt-get install build-essential make vim tmux git htop sysstat ioping nfs-common vmtouch --yes
+RUN apt-get install build-essential make vim tmux git htop sysstat ioping nfs-common vmtouch wget curl --yes
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 
 # Install Python
-RUN apt-get install python3.11 python-is-python3 python3-pip --yes
+RUN DEBIAN_FRONTEND="noninteractive" apt-get install build-essential gdb lcov pkg-config \
+      libbz2-dev libffi-dev libgdbm-dev libgdbm-compat-dev liblzma-dev \
+      libncurses5-dev libreadline6-dev libsqlite3-dev libssl-dev \
+      lzma lzma-dev tk-dev uuid-dev zlib1g-dev --yes
+RUN git clone https://github.com/colesbury/nogil-3.12-final /nogil
+WORKDIR /nogil
+RUN ./configure --enable-optimizations --with-pydebug
+RUN make -j16
+RUN make install
+
+# Install Python
+WORKDIR /
+RUN apt-get install python-is-python3 python3-pip --yes
 RUN python -m pip install --upgrade pip
 
 # Install PostgreSQL client
