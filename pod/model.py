@@ -1,8 +1,10 @@
 import random
 from pathlib import Path
 from typing import Dict, List, Optional
+from itertools import product
 
 import matplotlib.figure
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from loguru import logger
@@ -46,42 +48,107 @@ class QLearningPoddingModel(PoddingModel):
         OTHER
     ]
     SIZES = [1_000_000_000, 1_000_000, 1_000, 100, 1, -2]
-    PROBABILITIES = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0, None]
+    PROBABILITIES = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]
 
-    def __init__(self, train=False):
+    def __init__(self, qt_path=None, train=False, alpha=0.2, gamma=0.8):
         self.state_to_qt_idx = {}
         idx = 0
         self.actions = list(PodAction)
-        for has_changed in [True, False]: # has changed
-            for obj_s in QLearningPoddingModel.SIZES: # current obj len
-                for pod_s in QLearningPoddingModel.SIZES:
-                    for pod_max_change_prob in QLearningPoddingModel.PROBABILITIES: 
-                        for oid_change_prob in QLearningPoddingModel.PROBABILITIES:
-                            for obj_type in QLearningPoddingModel.TYPES:
-                                self.state_to_qt_idx[(has_changed, obj_s, pod_s, pod_max_change_prob, oid_change_prob, obj_type)] = idx
-                                idx += 1
+        for idx, (has_changed, obj_s, pod_s, pod_max_change_prob, oid_change_prob, obj_type) in enumerate(product(
+            [True, False],
+            QLearningPoddingModel.SIZES,
+            QLearningPoddingModel.SIZES,
+            QLearningPoddingModel.PROBABILITIES,
+            QLearningPoddingModel.PROBABILITIES,
+            QLearningPoddingModel.TYPES,  
+        )):
+            self.state_to_qt_idx[(has_changed, obj_s, pod_s, pod_max_change_prob, oid_change_prob, obj_type)] = idx
 
-        self.q_table = np.zeros((len(self.state_to_qt_idx), len(self.actions)))
+        if qt_path is not None:
+            with open(qt_path, "rb") as qtable_path:
+                self.q_table = np.load(qtable_path)
+        else:
+            self.q_table = np.zeros((len(self.state_to_qt_idx), len(self.actions)))
+        
+        self.nnz_qtable = []
+
         self.feature_collector = FeatureCollectorModel("", None)
-        self.action_to_pod_action = {i: self.actions[i] for i in range(len(self.actions))}
         self.pod_action_to_action = {self.actions[i]: i for i in range(len(self.actions))}
         self.train = train
+        self.features = {
+            "oid": [],
+            "pod_size": [],
+            "pod_max_change_prob": [],
+            "oid_count": [],
+            "oid_change_count": [],
+            "oid_change_prob": [],
+            "obj_type": [],
+            "obj_len": [],
+            "has_changed": [],
+        }
+
         if self.train:
-            self.epsilon = 0
+            self.epsilon = 1
             self.history = []
-            self.alpha = 0.15
-            self.gamma = 0.6
+            self.alpha = alpha
+            self.gamma = gamma
             self.reward_history = []
+            self.size_history = []
+            self.dump_time_history = []
+            
     
-    def podding_fn(self, obj: Object, pickler: BasePickler) -> PodAction:
-        features = self.feature_collector.get_features(obj, pickler)
+    def get_features(self, obj, pickler):
+        self.features["oid"].append(id(obj))
+        self.features["pod_size"].append(self._get_pod_size(pickler))
+        self.features["pod_max_change_prob"].append(__FEATURE__.pod_max_change_prob(pickler))
+        self.features["oid_count"].append(__FEATURE__.oid_count(id(obj)))
+        self.features["oid_change_count"].append(__FEATURE__.oid_change_count(id(obj)))
+        self.features["oid_change_prob"].append(__FEATURE__.oid_change_prob(id(obj)))
+        self.features["obj_type"].append(type(obj).__name__)
+        self.features["obj_len"].append(self._get_obj_len(obj))
+        return self.features
+
+    def _get_obj_len(self, obj: Object) -> Optional[int]:
+        len_fn = getattr(obj, "__len__", None)
+        if len_fn is None:
+            return None
+        return len_fn()
+    
+    def _get_pod_size(self, pickler: BasePickler) -> Optional[int]:
+        file = getattr(pickler, "file", None)
+        if file is None:
+            logger.warning("Unexpectedly missing pickler's field: file.")
+            return None
+        return len(file.getvalue())
+
+    def _get_pod_id(self, pickler: BasePickler) -> Optional[PodId]:
+        root_pid = getattr(pickler, "root_pid", None)
+        if root_pid is None:
+            logger.warning("Unexpectedly missing pickler's field: root_pid.")
+            return None
+        return root_pid
+
+    def _get_pod_max_change_prob(self, pickler: BasePickler) -> Optional[float]:
+        root_pid = self._get_pod_id(pickler)
+        if root_pid is None:
+            return None
+        return __FEATURE__.pod_max_change_prob(root_pid)
+    
+    def podding_fn(self, obj: Object, pickler: BasePickler, history_list: list=None) -> PodAction:
+        features = self.get_features(obj, pickler)
         q_table_idx = self._get_q_table_idx(features)
-        action = np.argmax(self.q_table[q_table_idx])
-        if self.train and random.uniform(0, 1) < self.epsilon:
-            action = random.choice([i for i in range(len(self.actions))])
+        action_idx = np.argmax(self.q_table[q_table_idx])
+        if self.train and random.random() < self.epsilon:
+            action_idx = random.randint(0, len(self.actions) - 1) # Both sides of range are inclusive
         if self.train:
-            self.history.append((q_table_idx, action))
-        return self.action_to_pod_action[action]
+            # self.history.append((q_table_idx, action_idx))
+            if history_list:
+                history_list.append((q_table_idx, action_idx))
+        return self.actions[action_idx]
+
+    def post_podding_fn(self) -> None:
+        for oid in self.features["oid"][len(self.features["has_changed"]) :]:
+            self.features["has_changed"].append(__FEATURE__.has_changed(oid))
 
     def set_epsilon(self, eps):
         self.epsilon = eps
@@ -122,8 +189,6 @@ class QLearningPoddingModel(PoddingModel):
             feature_pod_max_change = features["pod_max_change_prob"][-1]
             if feature_pod_max_change is None:
                 feature_pod_max_change = 0.0
-            if lo_p is None:
-                lo_p = 0.0
             if feature_pod_max_change >= lo_p and pod_max_change_prob < 0:
                 if (hi_p - feature_pod_max_change) <= (feature_pod_max_change - lo_p):
                     pod_max_change_prob = hi_p
@@ -138,11 +203,12 @@ class QLearningPoddingModel(PoddingModel):
                     oid_change_prob = hi_p
                 else:
                     oid_change_prob = lo_p
-        return pod_max_change_prob, oid_change_prob
+        return max(pod_max_change_prob, 0.0), max(oid_change_prob, 0.0)
     
     def batch_update_q(self, reward):
-        print(f"UPDATING ON {len(self.history)} ITEMS")
+        # logger.info(f"UPDATING ON {len(self.history)} ITEMS")
         self.reward_history.append(reward)
+        self.history = self.history.reverse()
         final_state_idx, final_action_idx = self.history[0]
         self.q_table[final_state_idx, final_action_idx] = reward
         for i in range(1, len(self.history)):
@@ -153,9 +219,59 @@ class QLearningPoddingModel(PoddingModel):
             self.q_table[state_idx, action_idx] = updated_q_val
         self.history = []
     
-    def plot_rewards(self):
-        # Can't plt.show when running on docker apparently, so printing them out to plot on other machine
-        print(self.reward_history)
+    def batch_update_q_parallel(self, reward_hist_list):
+        # logger.info(f"UPDATING ON {len(self.history)} ITEMS")
+        for reward, history in reward_hist_list:
+            if len(history) > 0:
+                history.reverse()
+                final_state_idx, final_action_idx = history[0]
+                self.q_table[final_state_idx, final_action_idx] = reward
+                for i in range(1, len(history)):
+                    state_idx, action_idx = history[i]
+                    next_state_idx, _ = history[i-1]
+                    next_max = np.max(self.q_table[next_state_idx])
+                    updated_q_val = (1 - self.alpha) * self.q_table[state_idx, action_idx] + self.alpha * (self.gamma * next_max)
+                    self.q_table[state_idx, action_idx] = updated_q_val
+    
+    def save_q_table(self, save_path):
+        with open(save_path, "wb") as qt_save_path:
+            np.save(save_path, self.q_table)
+    
+    def plot_stats(self, name=""):
+        plt.cla()
+        plt.clf()
+        plt.figure()
+        plt.plot(self.reward_history)
+        plt.xlabel("Dump")
+        plt.ylabel("Reward")
+        plt.savefig(f"reward_plot_{name}.png")
+
+        plt.cla()
+        plt.clf()
+        plt.figure()
+        plt.plot(self.size_history)
+        plt.xlabel("epoch")
+        plt.ylabel("size")
+        plt.savefig(f"size_{name}.png")
+
+        # plt.cla()
+        # plt.clf()
+        # plt.figure()
+        # plt.plot(self.dump_time_history)
+        # plt.xlabel("epoch")
+        # plt.ylabel("time")
+        # plt.savefig(f"dumptime_{name}.png")
+
+        # plt.cla()
+        # plt.clf()
+        # plt.figure()
+        # plt.plot(self.nnz_qtable)
+        # plt.xlabel("epoch")
+        # plt.ylabel("nnz")
+        # plt.savefig(f"nnz_{name}.png")
+        plt.show()
+    
+
 
 class RandomPoddingModel:
     def __init__(self, weights: Optional[List[float]] = None) -> None:
@@ -193,38 +309,10 @@ class FeatureCollectorModel:
         self.features["obj_type"].append(type(obj).__name__)
         self.features["obj_len"].append(self._get_obj_len(obj))
         return self._podding_fn(obj, pickler)
-    
-    def _reset_features(self):
-        self.features = {
-            "oid": [],
-            "pod_size": [],
-            "pod_max_change_prob": [],
-            "oid_count": [],
-            "oid_change_count": [],
-            "oid_change_prob": [],
-            "obj_type": [],
-            "obj_len": [],
-            "has_changed": [],
-        }
 
-    def get_features(self, obj, pickler):
-        self.features["oid"].append(id(obj))
-        self.features["pod_size"].append(self._get_pod_size(pickler))
-        self.features["pod_max_change_prob"].append(__FEATURE__.pod_max_change_prob(pickler))
-        self.features["oid_count"].append(__FEATURE__.oid_count(id(obj)))
-        self.features["oid_change_count"].append(__FEATURE__.oid_change_count(id(obj)))
-        self.features["oid_change_prob"].append(__FEATURE__.oid_change_prob(id(obj)))
-        self.features["obj_type"].append(type(obj).__name__)
-        self.features["obj_len"].append(self._get_obj_len(obj))
-        feature_dict = dict(self.features)
-        # self._reset_features()
-        return feature_dict
-
-
-    def post_podding_fn(self, save=True) -> None:
+    def post_podding_fn(self) -> None:
         for oid in self.features["oid"][len(self.features["has_changed"]) :]:
             self.features["has_changed"].append(__FEATURE__.has_changed(oid))
-        if save:
             self.save(save_path=self._save_path)
 
     def save(self, save_path: Path) -> None:

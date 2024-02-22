@@ -36,8 +36,7 @@ RUN python -m pip install -r /pod/requirements.txt
 COPY ./pod /pod/pod
 COPY ./setup.py /pod/setup.py
 COPY ./README.md /pod/README.md
-# Copying over the simple notebook for basic training tests
-COPY ./notebooks/simple.ipynb /pod/notebooks/simple.ipynb
+
 RUN python -m pip install -e /pod/
 
 WORKDIR /
