@@ -40,7 +40,7 @@ def deserialize_pod_id(serialized_pod_id: bytes) -> PodId:
 def union_find(pids: Set[PodId], deps: Dict[PodId, PodDependency]) -> Dict[PodId, PodId]:
     # Filter out unrelated deps, assuming no edge between two tids.
     related_tids = set(pid.tid for pid in pids)
-    deps = {pid: dep for pid, dep in deps.items() if pid.tid in related_tids}
+    related_deps = {pid: dep for pid, dep in deps.items() if pid.tid in related_tids}
 
     # Path compression.
     roots: Dict[PodId, PodId] = {}
@@ -52,8 +52,13 @@ def union_find(pids: Set[PodId], deps: Dict[PodId, PodDependency]) -> Dict[PodId
         return roots[pid]
 
     # Union find iterations.
-    for pid, dep in deps.items():
+    for pid, dep in related_deps.items():
         for pid2 in dep.dep_pids:
+            if related_deps[pid2].immutable:
+                # logger.info(f"Skipping {pid} -> {pid2} (immutable)")
+                continue
+            # if dep.immutable:
+            #     logger.warning(f"Unexpectedly found {pid} (immutable) -> {pid2}")
             root_pid = find_root(pid)
             root_pid2 = find_root(pid2)
             roots[root_pid2] = root_pid

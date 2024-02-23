@@ -144,6 +144,10 @@ class RandomMutatingListCells(NotebookCells):
                 f"  secrets.token_bytes({self.elem_size})\n"
                 f"  for idx in range({self.list_size})\n"
                 "]\n"
+                "l_share = l + [\n"  # Sharing immutable data with mutating list.
+                f"  secrets.token_bytes({self.elem_size})\n"
+                f"  for idx in range({self.list_size})\n"
+                "]\n"
                 "l2 = [l]; l.append(l2)"  # Test self-referential objects.
             )
 

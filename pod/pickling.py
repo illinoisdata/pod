@@ -280,9 +280,7 @@ class ManualPodding:
         complex,
         bool,
         tuple,
-        # Common ignores.
         NoneType,
-        type,
     )
     SPLIT_TYPES = (
         # Builtin types.
@@ -290,6 +288,7 @@ class ManualPodding:
         bytes,
         list,
         dict,
+        type,
         # Numerical types.
         np.ndarray,
         pd.DataFrame,
@@ -303,6 +302,7 @@ class ManualPodding:
         # Builtin types.
         str,
         bytes,
+        type,
         # Numerical types.
         np.ndarray,
         pd.DataFrame,
@@ -414,11 +414,21 @@ class StaticPodPicklingMetadata:
 
 
 class BaseStaticPodPickler(BasePickler):
+    IMMUTABLE_TYPES = (
+        str,
+        bytes,
+        # Not all class types are immutable but pickle saves them as a global object anyway.
+        type,
+    )
+
     def __init__(self, *args, **kwargs) -> None:
         BasePickler.__init__(self, *args, **kwargs)
 
     def get_root_dep(self) -> PodDependency:
         raise NotImplementedError("Abstract method")
+
+    def is_immutable(self, obj: Object) -> bool:
+        return isinstance(obj, BaseStaticPodPickler.IMMUTABLE_TYPES)
 
 
 class FinalPodPickler(BaseStaticPodPickler):
@@ -445,6 +455,7 @@ class FinalPodPickler(BaseStaticPodPickler):
             dep_pids=self.memo.get_dep_pids(),
             rank=self.root_rank,
             meta=bytes(),
+            immutable=self.is_immutable(self.root_obj),
         )
 
 
@@ -456,7 +467,6 @@ class StaticPodPickler(BaseStaticPodPickler):
         bool,
         tuple,
         NoneType,
-        type,
     )
 
     def __init__(
@@ -500,7 +510,6 @@ class StaticPodPickler(BaseStaticPodPickler):
         pid = make_pod_id(self.root_pid.tid, oid)
         if oid not in self.ctx.seen_oid:  # Only dump and write this pod once.
             self.ctx.seen_oid.add(oid)
-            self.root_dep_pids.add(pid)
             StaticPodPickler.dump_and_pod_write(
                 obj,
                 pid,
@@ -509,6 +518,7 @@ class StaticPodPickler(BaseStaticPodPickler):
                 is_final=(pod_action == PodAction.split_final),
                 pickle_kwargs=self.pickle_kwargs,
             )
+        self.root_dep_pids.add(pid)
         return oid
 
     def safe_podding_fn(self, obj: Object) -> PodAction:
@@ -529,6 +539,7 @@ class StaticPodPickler(BaseStaticPodPickler):
             dep_pids=self.root_dep_pids | self.memo.get_dep_pids(),
             rank=self.root_rank,
             meta=bytes(),
+            immutable=self.is_immutable(self.root_obj),
         )
 
     @staticmethod
