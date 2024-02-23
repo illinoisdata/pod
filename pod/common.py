@@ -59,9 +59,10 @@ class PodDependency:
     dep_pids: Set[PodId]  # List of pids this pod depends on.
     rank: Rank  # Rank of the pod for sorting.
     meta: bytes  # Serialized metadata.
+    immutable: bool  # Does this pod contain immutable object(s)?
 
     def __reduce__(self):
-        return self.__class__, (self.dep_pids, self.rank, self.meta)
+        return self.__class__, (self.dep_pids, self.rank, self.meta, self.immutable)
 
 
 def plot_deps(deps: Dict[PodId, PodDependency]):
