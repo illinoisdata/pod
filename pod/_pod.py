@@ -76,9 +76,9 @@ class PodNamespace(dict):
         self.active_names.discard(name)
         return dict.__delitem__(self, name)
 
-    def __iter__(self):
+    def items(self):
         self.active_names = set(self.keys())  # TODO: Use enum for this.
-        return dict.__iter__(self)
+        return dict.items(self)
 
     def pod_active_names(self) -> Set[str]:
         return self.active_names
