@@ -5,6 +5,7 @@ Pod storage interface.
 from __future__ import annotations  # isort:skip
 import pod.__pickle__  # noqa, isort:skip
 
+import threading
 from pathlib import Path
 from typing import Dict, Optional, Set, Tuple
 
@@ -31,6 +32,9 @@ class ObjectStorage:
         raise NotImplementedError("Abstract method")
 
 
+""" Snapshot namespace storage """
+
+
 class SnapshotObjectStorage(ObjectStorage):
     SNAPSHOT_OID = 0  # Assume no object resides at this address.
 
@@ -55,6 +59,9 @@ class SnapshotObjectStorage(ObjectStorage):
 
     def estimate_size(self) -> int:
         return self._pickling.estimate_size()
+
+
+""" Pod namespace storage """
 
 
 # TODO: Filter read-only variables in function scope dict better.
@@ -98,7 +105,8 @@ class PodObjectStorage(ObjectStorage):
     def __init__(self, pickling: PodPickling) -> None:
         self._pickling = pickling
 
-    def new(self, pod_dir: Path) -> PodObjectStorage:
+    @staticmethod
+    def new(pod_dir: Path) -> PodObjectStorage:
         podding_fn = ManualPodding.podding_fn
         post_podding_fn = None
         storage = FilePodStorage(pod_dir)
@@ -175,3 +183,113 @@ class PodObjectStorage(ObjectStorage):
             for name in namespace.keys()
             if name not in prev_namemap or connected_roots[prev_namemap[name]] in active_roots
         }
+
+
+""" Asynchronous pod namespace storage """
+
+
+class LockIf:
+    def __init__(self, lock, pred) -> None:
+        self._lock = lock
+        self._pred = pred
+
+    def __enter__(self) -> LockIf:
+        if self._pred:
+            self._lock.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        if self._pred:
+            self._lock.__exit__(exc_type, exc_val, exc_tb)
+        return
+
+
+class AsyncPodNamespace(PodNamespace):
+    def __init__(self, *args, **kwargs) -> None:
+        PodNamespace.__init__(self, *args, **kwargs)
+        self._lock = threading.Lock()
+        self._locked_names: Set[str] = set()
+
+    def __getitem__(self, name: str) -> Object:
+        with LockIf(self._lock, name in self._locked_names):
+            return PodNamespace.__getitem__(self, name)
+
+    def __setitem__(self, name: str, obj: Object) -> None:
+        with LockIf(self._lock, name in self._locked_names):
+            return PodNamespace.__setitem__(self, name, obj)
+
+    def __delitem__(self, name: str):
+        with LockIf(self._lock, name in self._locked_names):
+            return PodNamespace.__delitem__(self, name)
+
+    def items(self):
+        with LockIf(self._lock, len(self._locked_names) > 0):
+            return PodNamespace.items(self)
+
+    def lock(self, names: Set[str]) -> None:
+        assert self._lock.acquire(blocking=False)
+        self._locked_names = names
+
+    def release(self) -> None:
+        self._lock.release()
+        self._locked_names.clear()
+
+
+class AsyncPodSaveThread(threading.Thread):
+    def __init__(
+        self,
+        pickling: PodPickling,
+        namespace: AsyncPodNamespace,
+        podspace: Dict[PodId, Object],
+        *args,
+        **kwargs,
+    ):
+        threading.Thread.__init__(self, *args, **kwargs)
+        self._pickling = pickling
+        self._namespace = namespace
+        self._podspace = podspace
+
+    def run(self):
+        with self._pickling.dump_batch(self._podspace) as dump_session:
+            for pid, obj in self._podspace.items():
+                dump_session.dump(pid, obj)
+            self._namespace.release()
+
+
+class AsyncPodObjectStorage(PodObjectStorage):
+    NAMEMAP_OID = 0  # Assume no object resides at this address.
+
+    def __init__(self, pickling: PodPickling) -> None:
+        self._pickling = pickling
+        self._running_save: Optional[threading.Thread] = None
+
+    @staticmethod
+    def new(pod_dir: Path) -> PodObjectStorage:
+        return AsyncPodObjectStorage.new(pod_dir)
+
+    def new_managed_namespace(self, namespace: Namespace = {}) -> Namespace:
+        return AsyncPodNamespace(namespace)
+
+    def save(self, namespace: Namespace) -> TimeId:
+        assert isinstance(namespace, AsyncPodNamespace)
+
+        # Join existing saves first.
+        if self._running_save is not None:
+            self._running_save.join()
+            self._running_save = None
+
+        # Plan for next namemap.
+        __FEATURE__.new_dump()
+        tid = step_time_id()
+        namemap_pid, namemap = self._save_as_namemap(tid, namespace)
+
+        # Save asynchronously in a different thread.
+        podspace = {pid: namespace[name] for name, pid in namemap.items() if pid.tid == tid}
+        active_names = {name for name, pid in namemap.items() if pid.tid == tid}
+        namespace.lock(active_names)
+        self._running_save = AsyncPodSaveThread(self._pickling, namespace, podspace)
+        self._running_save.start()
+
+        # Set namemap to the planned one.
+        namespace.pod_reset_namemap(namemap)
+        return namemap_pid.tid
