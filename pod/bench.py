@@ -15,7 +15,7 @@ import numpy as np
 import simple_parsing
 from loguru import logger
 
-from pod._pod import ObjectStorage, PodObjectStorage, SnapshotObjectStorage
+from pod._pod import AsyncPodObjectStorage, ObjectStorage, PodObjectStorage, SnapshotObjectStorage
 from pod.common import TimeId
 from pod.feature import __FEATURE__
 from pod.model import FeatureCollectorModel, RandomPoddingModel
@@ -61,6 +61,7 @@ class BenchArgs:
     rmlist_num_elem_mutate: int = 10  # Number of elements mutating in each cell.
 
     """ Pod storage """
+    sut_async: bool = False  # Use async SUT.
     pod_dir: Optional[Path] = None  # Path to pod storage root directory.
     psql_hostname: str = "localhost"  # Hostname where PostgreSQL server is running.
     psql_port: int = 5432  # Port on the hostname where PostgreSQL server is running.
@@ -268,6 +269,8 @@ class SUT:
         pickling = SUT.pickling(args)
         if args.sut == "snapshot":
             return SnapshotObjectStorage(pickling)
+        if args.sut_async:
+            return AsyncPodObjectStorage(pickling)
         return PodObjectStorage(pickling)
 
 
