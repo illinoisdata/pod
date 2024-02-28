@@ -1,7 +1,8 @@
 import random
-from pathlib import Path
-from typing import Dict, List, Optional
 from itertools import product
+from pathlib import Path
+from types import CodeType, FunctionType, ModuleType, NoneType
+from typing import Dict, List, Optional
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -12,8 +13,6 @@ from loguru import logger
 from pod.common import Object, PodId
 from pod.feature import __FEATURE__
 from pod.pickling import BasePickler, PodAction, PoddingFunction
-
-from types import CodeType, FunctionType, ModuleType, NoneType
 
 
 class PoddingModel:
@@ -31,22 +30,50 @@ class QLearningPoddingModel(PoddingModel):
         tuple,
         NoneType,
         type,
-        str
     ]
+
     SIMPLE_TYPE = "SIMPLE_TYPE"
     OTHER = "other"
-    TYPES = [ 
+    TYPES = [
         SIMPLE_TYPE,
-        list, 
+        list,
         dict,
-        np.ndarray, 
-        pd.DataFrame, 
+        str,
+        bytes,
+        np.ndarray,
+        pd.DataFrame,
         matplotlib.figure.Figure,
         FunctionType,
         ModuleType,
         CodeType,
-        OTHER
+        OTHER,
     ]
+
+    SPLIT_TYPES = (
+        # Builtin types.
+        str,
+        bytes,
+        list,
+        dict,
+        # Numerical types.
+        np.ndarray,
+        pd.DataFrame,
+        matplotlib.figure.Figure,
+        # Nested types.
+        FunctionType,
+        ModuleType,
+        CodeType,
+    )
+    FINAL_TYPES = (
+        # Builtin types.
+        str,
+        bytes,
+        # Numerical types.
+        np.ndarray,
+        pd.DataFrame,
+        matplotlib.figure.Figure,
+    )
+
     SIZES = [1_000_000_000, 1_000_000, 1_000, 100, 1, -2]
     PROBABILITIES = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]
 
@@ -54,22 +81,36 @@ class QLearningPoddingModel(PoddingModel):
         self.state_to_qt_idx = {}
         idx = 0
         self.actions = list(PodAction)
-        for idx, (has_changed, obj_s, pod_s, pod_max_change_prob, oid_change_prob, obj_type) in enumerate(product(
-            [True, False],
-            QLearningPoddingModel.SIZES,
-            QLearningPoddingModel.SIZES,
-            QLearningPoddingModel.PROBABILITIES,
-            QLearningPoddingModel.PROBABILITIES,
-            QLearningPoddingModel.TYPES,  
-        )):
-            self.state_to_qt_idx[(has_changed, obj_s, pod_s, pod_max_change_prob, oid_change_prob, obj_type)] = idx
+        num_rows_qt = (
+            2
+            * len(QLearningPoddingModel.SIZES)
+            * len(QLearningPoddingModel.SIZES)
+            * len(QLearningPoddingModel.PROBABILITIES)
+            * len(QLearningPoddingModel.PROBABILITIES)
+            * len(QLearningPoddingModel.TYPES)
+        )
 
         if qt_path is not None:
             with open(qt_path, "rb") as qtable_path:
                 self.q_table = np.load(qtable_path)
         else:
-            self.q_table = np.zeros((len(self.state_to_qt_idx), len(self.actions)))
-        
+            self.q_table = np.zeros((num_rows_qt, len(self.actions)))
+
+        for idx, (has_changed, obj_s, pod_s, pod_max_change_prob, oid_change_prob, obj_type) in enumerate(
+            product(
+                [True, False],
+                QLearningPoddingModel.SIZES,
+                QLearningPoddingModel.SIZES,
+                QLearningPoddingModel.PROBABILITIES,
+                QLearningPoddingModel.PROBABILITIES,
+                QLearningPoddingModel.TYPES,
+            )
+        ):
+            self.state_to_qt_idx[(has_changed, obj_s, pod_s, pod_max_change_prob, oid_change_prob, obj_type)] = idx
+            if qt_path is None:
+                self._set_inductive_bias(obj_type, idx)
+
+        print(self.q_table.shape)
         self.nnz_qtable = []
 
         self.feature_collector = FeatureCollectorModel("", None)
@@ -95,8 +136,18 @@ class QLearningPoddingModel(PoddingModel):
             self.reward_history = []
             self.size_history = []
             self.dump_time_history = []
-            
-    
+
+    def _set_inductive_bias(self, obj_type, idx):
+        if obj_type == QLearningPoddingModel.SIMPLE_TYPE:
+            self.q_table[idx, :] -= 5
+            self.q_table[idx, 0] += 10  # 0 is bundle
+        elif obj_type in QLearningPoddingModel.FINAL_TYPES:
+            self.q_table[idx, :] -= 5
+            self.q_table[idx, 2] += 10  # 2 is final
+        elif obj_type in QLearningPoddingModel.SPLIT_TYPES:
+            self.q_table[idx, :] -= 5
+            self.q_table[idx, 1] += 10  # 1 is split
+
     def get_features(self, obj, pickler):
         self.features["oid"].append(id(obj))
         self.features["pod_size"].append(self._get_pod_size(pickler))
@@ -109,11 +160,14 @@ class QLearningPoddingModel(PoddingModel):
         return self.features
 
     def _get_obj_len(self, obj: Object) -> Optional[int]:
-        len_fn = getattr(obj, "__len__", None)
-        if len_fn is None:
+        try:
+            len_fn = getattr(obj, "__len__", None)
+            if len_fn is None:
+                return None
+            return len_fn()
+        except:
             return None
-        return len_fn()
-    
+
     def _get_pod_size(self, pickler: BasePickler) -> Optional[int]:
         file = getattr(pickler, "file", None)
         if file is None:
@@ -133,13 +187,13 @@ class QLearningPoddingModel(PoddingModel):
         if root_pid is None:
             return None
         return __FEATURE__.pod_max_change_prob(root_pid)
-    
-    def podding_fn(self, obj: Object, pickler: BasePickler, history_list: list=None) -> PodAction:
+
+    def podding_fn(self, obj: Object, pickler: BasePickler, history_list: list = None) -> PodAction:
         features = self.get_features(obj, pickler)
         q_table_idx = self._get_q_table_idx(features)
         action_idx = np.argmax(self.q_table[q_table_idx])
         if self.train and random.random() < self.epsilon:
-            action_idx = random.randint(0, len(self.actions) - 1) # Both sides of range are inclusive
+            action_idx = random.randint(0, len(self.actions) - 1)  # Both sides of range are inclusive
         if self.train:
             # self.history.append((q_table_idx, action_idx))
             if history_list:
@@ -185,7 +239,7 @@ class QLearningPoddingModel(PoddingModel):
         pod_max_change_prob = -1.0
         oid_change_prob = -1.0
         for i in range(len(self.PROBABILITIES) - 2):
-            hi_p, lo_p = self.PROBABILITIES[i], self.PROBABILITIES[i+1]
+            hi_p, lo_p = self.PROBABILITIES[i], self.PROBABILITIES[i + 1]
             feature_pod_max_change = features["pod_max_change_prob"][-1]
             if feature_pod_max_change is None:
                 feature_pod_max_change = 0.0
@@ -194,7 +248,7 @@ class QLearningPoddingModel(PoddingModel):
                     pod_max_change_prob = hi_p
                 else:
                     pod_max_change_prob = lo_p
-            
+
             feature_oid_change_prob = features["oid_change_prob"][-1]
             if feature_oid_change_prob is None:
                 feature_oid_change_prob = 0.0
@@ -204,7 +258,7 @@ class QLearningPoddingModel(PoddingModel):
                 else:
                     oid_change_prob = lo_p
         return max(pod_max_change_prob, 0.0), max(oid_change_prob, 0.0)
-    
+
     def batch_update_q(self, reward):
         # logger.info(f"UPDATING ON {len(self.history)} ITEMS")
         self.reward_history.append(reward)
@@ -213,14 +267,13 @@ class QLearningPoddingModel(PoddingModel):
         self.q_table[final_state_idx, final_action_idx] = reward
         for i in range(1, len(self.history)):
             state_idx, action_idx = self.history[i]
-            next_state_idx, _ = self.history[i-1]
+            next_state_idx, _ = self.history[i - 1]
             next_max = np.max(self.q_table[next_state_idx])
             updated_q_val = (1 - self.alpha) * self.q_table[state_idx, action_idx] + self.alpha * (self.gamma * next_max)
             self.q_table[state_idx, action_idx] = updated_q_val
         self.history = []
-    
+
     def batch_update_q_parallel(self, reward_hist_list):
-        # logger.info(f"UPDATING ON {len(self.history)} ITEMS")
         for reward, history in reward_hist_list:
             if len(history) > 0:
                 history.reverse()
@@ -228,15 +281,17 @@ class QLearningPoddingModel(PoddingModel):
                 self.q_table[final_state_idx, final_action_idx] = reward
                 for i in range(1, len(history)):
                     state_idx, action_idx = history[i]
-                    next_state_idx, _ = history[i-1]
+                    next_state_idx, _ = history[i - 1]
                     next_max = np.max(self.q_table[next_state_idx])
-                    updated_q_val = (1 - self.alpha) * self.q_table[state_idx, action_idx] + self.alpha * (self.gamma * next_max)
+                    updated_q_val = (1 - self.alpha) * self.q_table[state_idx, action_idx] + self.alpha * (
+                        self.gamma * next_max
+                    )
                     self.q_table[state_idx, action_idx] = updated_q_val
-    
+
     def save_q_table(self, save_path):
         with open(save_path, "wb") as qt_save_path:
             np.save(save_path, self.q_table)
-    
+
     def plot_stats(self, name=""):
         plt.cla()
         plt.clf()
@@ -253,24 +308,7 @@ class QLearningPoddingModel(PoddingModel):
         plt.xlabel("epoch")
         plt.ylabel("size")
         plt.savefig(f"size_{name}.png")
-
-        # plt.cla()
-        # plt.clf()
-        # plt.figure()
-        # plt.plot(self.dump_time_history)
-        # plt.xlabel("epoch")
-        # plt.ylabel("time")
-        # plt.savefig(f"dumptime_{name}.png")
-
-        # plt.cla()
-        # plt.clf()
-        # plt.figure()
-        # plt.plot(self.nnz_qtable)
-        # plt.xlabel("epoch")
-        # plt.ylabel("nnz")
-        # plt.savefig(f"nnz_{name}.png")
         plt.show()
-    
 
 
 class RandomPoddingModel:
@@ -281,6 +319,7 @@ class RandomPoddingModel:
 
     def podding_fn(self, obj: Object, pickler: BasePickler) -> PodAction:
         return random.choices(self.actions, weights=self.weights, k=1)[0]
+
 
 class FeatureCollectorModel:
     def __init__(self, save_path: Path, podding_fn: PoddingFunction) -> None:
