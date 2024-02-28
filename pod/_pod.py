@@ -6,12 +6,14 @@ from __future__ import annotations  # isort:skip
 import pod.__pickle__  # noqa, isort:skip
 
 import threading
+import time
 from pathlib import Path
 from typing import Dict, Optional, Set, Tuple
 
 from pod.common import Object, PodId, TimeId, make_pod_id, object_id, step_time_id
 from pod.feature import __FEATURE__
 from pod.pickling import ManualPodding, PodPickling, SnapshotPodPickling, StaticPodPickling
+from pod.stats import ExpStat
 from pod.storage import FilePodStorage
 
 Namespace = Dict[str, Object]
@@ -30,6 +32,9 @@ class ObjectStorage:
 
     def estimate_size(self) -> int:
         raise NotImplementedError("Abstract method")
+
+    def instrument(self, expstat: Optional[ExpStat]) -> None:
+        pass
 
 
 """ Snapshot namespace storage """
@@ -238,30 +243,46 @@ class AsyncPodNamespace(PodNamespace):
 class AsyncPodSaveThread(threading.Thread):
     def __init__(
         self,
-        pickling: PodPickling,
+        pod_storage: AsyncPodObjectStorage,
         namespace: AsyncPodNamespace,
         podspace: Dict[PodId, Object],
         *args,
         **kwargs,
     ):
         threading.Thread.__init__(self, *args, **kwargs)
-        self._pickling = pickling
+        self._pod_storage = pod_storage
         self._namespace = namespace
         self._podspace = podspace
 
     def run(self):
-        with self._pickling.dump_batch(self._podspace) as dump_session:
+        if self._pod_storage._expstat is not None:
+            dump_start_ts = time.time()
+
+        # Actual saving.
+        with self._pod_storage._pickling.dump_batch(self._podspace) as dump_session:
             for pid, obj in self._podspace.items():
                 dump_session.dump(pid, obj)
             self._namespace.release()
+
+        if self._pod_storage._expstat is not None:
+            dump_end_ts = time.time()
+            self._pod_storage._save_count += 1
+            self._pod_storage._expstat.add_async_dump(
+                nth=self._pod_storage._save_count,
+                time_s=dump_end_ts - dump_start_ts,
+                storage_b=self._pod_storage.estimate_size(),
+            )
 
 
 class AsyncPodObjectStorage(PodObjectStorage):
     NAMEMAP_OID = 0  # Assume no object resides at this address.
 
     def __init__(self, pickling: PodPickling) -> None:
-        self._pickling = pickling
+        PodObjectStorage.__init__(self, pickling)
         self._running_save: Optional[threading.Thread] = None
+
+        self._expstat: Optional[ExpStat] = None
+        self._save_count: int = 0
 
     @staticmethod
     def new(pod_dir: Path) -> PodObjectStorage:
@@ -287,9 +308,12 @@ class AsyncPodObjectStorage(PodObjectStorage):
         podspace = {pid: namespace[name] for name, pid in namemap.items() if pid.tid == tid}
         active_names = {name for name, pid in namemap.items() if pid.tid == tid}
         namespace.lock(active_names)
-        self._running_save = AsyncPodSaveThread(self._pickling, namespace, podspace)
+        self._running_save = AsyncPodSaveThread(self, namespace, podspace)
         self._running_save.start()
 
         # Set namemap to the planned one.
         namespace.pod_reset_namemap(namemap)
         return namemap_pid.tid
+
+    def instrument(self, expstat: Optional[ExpStat]) -> None:
+        self._expstat = expstat

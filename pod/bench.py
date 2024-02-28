@@ -289,9 +289,13 @@ def run_exp1_impl(args: BenchArgs) -> None:
     nb_cells = Notebooks.nb(args)
     nb_exec = NotebookExecutor(nb_cells, the_locals=sut.new_managed_namespace())
 
-    # Dumps all steps.
+    # Measurement tracker.
     expstat = ExpStat()
+    sut.instrument(expstat)
+
+    # Dumps all steps.
     tids: List[TimeId] = []
+    exec_start_ts = time.time()
     for nth, (cell, the_globals, the_locals) in enumerate(nb_exec.iter()):
         # Dump current state.
         dump_start_ts = time.time()
@@ -308,10 +312,13 @@ def run_exp1_impl(args: BenchArgs) -> None:
 
         # Reset environment to reduce noise.
         gc.collect()
+    exec_stop_ts = time.time()
+    expstat.add_total_exec_t_s(exec_stop_ts - exec_start_ts)
     logger.info(f"Collected tids {tids}")
 
     # Save partial results (in case of load failure).
-    result_path = expstat.save(args.result_dir / args.expname)
+    (args.result_dir / args.expname).mkdir(parents=True, exist_ok=True)
+    result_path = expstat.save(args.result_dir / args.expname / "expstat.json")
     logger.info(f"Saved ExpStat (dump only) to {result_path}")
 
     # Load random steps.
@@ -337,7 +344,7 @@ def run_exp1_impl(args: BenchArgs) -> None:
     expstat.summary()
 
     # Write results
-    result_path = expstat.save(args.result_dir / args.expname)
+    result_path = expstat.save(args.result_dir / args.expname / "expstat.json")
     logger.info(f"Saved ExpStat to {result_path}")
 
 

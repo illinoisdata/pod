@@ -71,9 +71,12 @@ class LoadStat:
 class ExpStat:
     dumps: List[DumpStat] = field(default_factory=lambda: [])
     loads: List[LoadStat] = field(default_factory=lambda: [])
-
     dump_sum_t_s: float = 0.0
     load_sum_t_s: float = 0.0
+
+    total_exec_t_s: float = 0.0
+    async_dumps: List[DumpStat] = field(default_factory=lambda: [])
+    async_dump_sum_t_s: float = 0.0
 
     def add_dump(self, nth: int, time_s: float, storage_b: int) -> None:
         self.dumps.append(
@@ -106,6 +109,27 @@ class ExpStat:
             f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})"
         )
 
+    def add_total_exec_t_s(self, time_s: float) -> None:
+        self.total_exec_t_s = time_s
+        logger.info(f"total_exec_t= {strf_deltatime(time_s)}")
+
+    def add_async_dump(self, nth: int, time_s: float, storage_b: int) -> None:
+        self.async_dumps.append(
+            DumpStat(
+                nth=nth,
+                time_s=time_s,
+                storage_b=storage_b,
+            )
+        )
+
+        self.async_dump_sum_t_s += time_s
+        async_dump_avg_t_s = self.async_dump_sum_t_s / len(self.async_dumps)
+        logger.info(
+            f"nth= {nth}, t= {strf_deltatime(time_s)}, s= {strf_storage(storage_b)}"
+            f", avgt= {strf_deltatime(async_dump_avg_t_s)} ({strf_throughput(1.0/async_dump_avg_t_s)})"
+            " <async>"
+        )
+
     def summary(self) -> None:
         dump_avg_t_s = float("inf") if len(self.dumps) == 0 else self.dump_sum_t_s / len(self.dumps)
         load_avg_t_s = float("inf") if len(self.loads) == 0 else self.load_sum_t_s / len(self.loads)
@@ -116,17 +140,14 @@ class ExpStat:
         )
         logger.info(f"{len(self.loads)} loads" f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})")
 
-    def save(self, save_dir: Path) -> Path:
-        save_dir.mkdir(parents=True, exist_ok=True)
-        result_path = save_dir / "expstat.json"
-        with open(result_path, "w") as f:
+    def save(self, save_path: Path) -> Path:
+        with open(save_path, "w") as f:
             f.write(self.to_json())  # type: ignore
-        return result_path
+        return save_path
 
     @staticmethod
-    def load(save_dir: Path) -> ExpStat:
-        result_path = save_dir / "expstat.json"
-        with open(result_path, "r") as f:
+    def load(save_path: Path) -> ExpStat:
+        with open(save_path, "r") as f:
             return ExpStat.from_json(f.read())  # type: ignore
 
 
