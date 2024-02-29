@@ -212,7 +212,7 @@ class LockIf:
 class AsyncPodNamespace(PodNamespace):
     def __init__(self, *args, **kwargs) -> None:
         PodNamespace.__init__(self, *args, **kwargs)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._locked_names: Set[str] = set()
 
     def __getitem__(self, name: str) -> Object:
@@ -246,6 +246,7 @@ class AsyncPodSaveThread(threading.Thread):
         pod_storage: AsyncPodObjectStorage,
         namespace: AsyncPodNamespace,
         podspace: Dict[PodId, Object],
+        active_names: Set[str],
         *args,
         **kwargs,
     ):
@@ -253,8 +254,15 @@ class AsyncPodSaveThread(threading.Thread):
         self._pod_storage = pod_storage
         self._namespace = namespace
         self._podspace = podspace
+        self._active_names = active_names
+
+        self._run_barrier = threading.Barrier(2, timeout=5)  # This should be quick (<1 second).
 
     def run(self):
+        # Lock and wait at barrier to continue with the main thread.
+        self._namespace.lock(self._active_names)
+        self.wait_run_barrier()
+
         if self._pod_storage._expstat is not None:
             dump_start_ts = time.time()
 
@@ -272,6 +280,9 @@ class AsyncPodSaveThread(threading.Thread):
                 time_s=dump_end_ts - dump_start_ts,
                 storage_b=self._pod_storage.estimate_size(),
             )
+
+    def wait_run_barrier(self):
+        self._run_barrier.wait()
 
 
 class AsyncPodObjectStorage(PodObjectStorage):
@@ -307,9 +318,9 @@ class AsyncPodObjectStorage(PodObjectStorage):
         # Save asynchronously in a different thread.
         podspace = {pid: namespace[name] for name, pid in namemap.items() if pid.tid == tid}
         active_names = {name for name, pid in namemap.items() if pid.tid == tid}
-        namespace.lock(active_names)
-        self._running_save = AsyncPodSaveThread(self, namespace, podspace)
+        self._running_save = AsyncPodSaveThread(self, namespace, podspace, active_names)
         self._running_save.start()
+        self._running_save.wait_run_barrier()
 
         # Set namemap to the planned one.
         namespace.pod_reset_namemap(namemap)
