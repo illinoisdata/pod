@@ -46,6 +46,7 @@ SUTS=(
     "snp" 
     "imm"
     "pfl"
+    "pfa"
     "ppg"
     "prd"
     "pnj"
@@ -65,6 +66,9 @@ function get_sut_args() {
     elif [[ $_SUT == "pfl" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR}"
+    elif [[ $_SUT == "pfa" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --sut_async"
     elif [[ $_SUT == "ppg" ]]
     then
         sut_args="--sut pod_psql --psql_hostname podpsql --psql_port 5432"
@@ -97,6 +101,9 @@ function prepare_sut() {
     then
         :
     elif [[ $_SUT == "pfl" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pfa" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "ppg" ]]
