@@ -212,32 +212,46 @@ class LockIf:
 class AsyncPodNamespace(PodNamespace):
     def __init__(self, *args, **kwargs) -> None:
         PodNamespace.__init__(self, *args, **kwargs)
-        self._lock = threading.RLock()
+        self._sync_lock = threading.Lock()
+        self._namespace_lock = threading.Lock()
         self._locked_names: Set[str] = set()
+        self._saving_threads: Set[int] = set()
 
     def __getitem__(self, name: str) -> Object:
-        with LockIf(self._lock, name in self._locked_names):
+        if threading.get_ident() in self._saving_threads:  # Skip activating name for saving tread.
+            return dict.__getitem__(self, name)
+        with LockIf(self._namespace_lock, name in self._locked_names):
             return PodNamespace.__getitem__(self, name)
 
     def __setitem__(self, name: str, obj: Object) -> None:
-        with LockIf(self._lock, name in self._locked_names):
+        if threading.get_ident() in self._saving_threads:
+            return dict.__setitem__(self, name, obj)
+        with LockIf(self._namespace_lock, name in self._locked_names):
             return PodNamespace.__setitem__(self, name, obj)
 
     def __delitem__(self, name: str):
-        with LockIf(self._lock, name in self._locked_names):
+        if threading.get_ident() in self._saving_threads:
+            return dict.__delitem__(self, name)
+        with LockIf(self._namespace_lock, name in self._locked_names):
             return PodNamespace.__delitem__(self, name)
 
     def items(self):
-        with LockIf(self._lock, len(self._locked_names) > 0):
+        if threading.get_ident() in self._saving_threads:
+            return dict.items(self)
+        with LockIf(self._namespace_lock, len(self._locked_names) > 0):
             return PodNamespace.items(self)
 
     def lock(self, names: Set[str]) -> None:
-        assert self._lock.acquire(blocking=False)
-        self._locked_names = names
+        with self._sync_lock:
+            assert self._namespace_lock.acquire(blocking=False)
+            self._locked_names = names
+            self._saving_threads.add(threading.get_ident())
 
     def release(self) -> None:
-        self._lock.release()
-        self._locked_names.clear()
+        with self._sync_lock:
+            self._namespace_lock.release()
+            self._locked_names.clear()
+            self._saving_threads.discard(threading.get_ident())
 
 
 class AsyncPodSaveThread(threading.Thread):
