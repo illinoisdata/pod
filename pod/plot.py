@@ -3,10 +3,11 @@
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 import simple_parsing
 from loguru import logger
 
@@ -136,16 +137,16 @@ def plot_exp1batch(argv: List[str]) -> None:
     logger.info(args)
 
     # Plot exp1 (dump latency + storage + load latency).
-    N, M, R, SZ = 4, len(args.singles), 2.5, 0.8
+    N, M, R, SZ, FS, SFS = 5, len(args.singles), 2.5, 0.8, 7, 5
     fig, axes = plt.subplots(nrows=N, ncols=M, figsize=(SZ * R * M, SZ * N))
 
     for single, axs in zip(args.singles, axes.T):
-        assert len(axs) == 4
+        assert len(axs) == N
         logger.info("============================")
         logger.info(f"{single.name}")
 
         # Read all results.
-        all_results = [(result_path.name, ExpStat.load(result_path)) for result_path in single.result_paths]
+        all_results = [(result_path.parent.name, ExpStat.load(result_path)) for result_path in single.result_paths]
 
         # Print summary..
         for expname, result in all_results:
@@ -158,6 +159,12 @@ def plot_exp1batch(argv: List[str]) -> None:
         load_times: List[List[float]] = []
         dump_final_storage_gb: List[float] = []
         dump_storage_inc_gb: List[List[float]] = []
+        total_times: Dict[str, List[float]] = {
+            "exec": [],
+            "lock": [],
+            "wait": [],
+            "save": [],
+        }
         for expname, result in all_results:
             labels.append(expname)
             dump_times.append([stat.time_s for stat in result.dumps])
@@ -171,17 +178,51 @@ def plot_exp1batch(argv: List[str]) -> None:
                 ]
             )
 
-        # Plot dump time.
+            # Update total times.
+            total_dump_time = sum(stat.time_s for stat in result.dumps)
+            total_lock_time = sum(result.lock_times)
+            total_join_time = sum(result.join_times)
+            total_times["exec"].append(result.total_exec_t_s - total_lock_time - total_dump_time)
+            total_times["lock"].append(total_lock_time)
+            total_times["wait"].append(total_join_time)
+            total_times["save"].append(total_dump_time - total_join_time)
+
+        # Plot total time breakdown.
         ax = axs[0]
+        time_names = [
+            "exec",
+            "lock",
+            "wait",
+            "save",
+        ]
+        bottoms = np.zeros_like(labels, dtype="float64")
+        for time_name in time_names:
+            times = np.array(total_times[time_name])
+            ax.barh(labels, times, label=time_name, left=bottoms)
+            bottoms += times
+        ax.set_xlabel("Time Breakdown (s)")
+        ax.minorticks_on()
+        ax.yaxis.set_tick_params(which="minor", bottom=False)
+        ax.set_xlim(left=0)
+        ax.legend(
+            ncol=len(time_names),
+            bbox_to_anchor=(0.5, 1.05),
+            loc="lower center",
+            prop={"size": 3},
+        )
+
+        ax.set_title(f"{single.name}", y=1.2)
+
+        # Plot dump time.
+        ax = axs[1]
         ax.boxplot(dump_times, labels=labels, vert=False)
         ax.set_xlabel("Dump Latency (s)")
         ax.minorticks_on()
         ax.yaxis.set_tick_params(which="minor", bottom=False)
         ax.set_xlim(left=0)
-        ax.set_title(f"{single.name}")
 
         # Plot load time.
-        ax = axs[1]
+        ax = axs[2]
         ax.boxplot(load_times, labels=labels, vert=False)
         ax.set_xlabel("Load Latency (s)")
         ax.minorticks_on()
@@ -189,7 +230,7 @@ def plot_exp1batch(argv: List[str]) -> None:
         ax.set_xlim(left=0)
 
         # Plot dump stroage increments.
-        ax = axs[2]
+        ax = axs[3]
         ax.barh(list(range(len(dump_final_storage_gb))), dump_final_storage_gb)
         ax.set_xlabel("Storage (GB)")
         ax.set_yticks(list(range(len(labels))))
@@ -199,7 +240,7 @@ def plot_exp1batch(argv: List[str]) -> None:
         ax.set_xlim(left=0)
 
         # Plot dump stroage increments.
-        ax = axs[3]
+        ax = axs[4]
         ax.boxplot(dump_storage_inc_gb, labels=labels, vert=False)
         ax.set_xlabel("Storage inc. (GB)")
         ax.minorticks_on()
@@ -207,7 +248,7 @@ def plot_exp1batch(argv: List[str]) -> None:
         ax.set_xlim(left=0)
 
     for ax in axes.flatten():
-        set_fontsize(ax, 7, 5)
+        set_fontsize(ax, FS, SFS)
 
     fig.tight_layout()
     plt.show()
