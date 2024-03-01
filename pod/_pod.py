@@ -194,13 +194,18 @@ class PodObjectStorage(ObjectStorage):
 
 
 class LockIf:
-    def __init__(self, lock, pred) -> None:
+    def __init__(self, lock: threading.Lock, pred: bool, expstat: Optional[ExpStat]) -> None:
         self._lock = lock
         self._pred = pred
+        self._expstat = expstat
 
     def __enter__(self) -> LockIf:
         if self._pred:
+            if self._expstat is not None:
+                lock_start_ts = time.time()
             self._lock.__enter__()
+            if self._expstat is not None:
+                self._expstat.add_lock_time(time.time() - lock_start_ts)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -210,8 +215,9 @@ class LockIf:
 
 
 class AsyncPodNamespace(PodNamespace):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, pod_storage: AsyncPodObjectStorage, *args, **kwargs) -> None:
         PodNamespace.__init__(self, *args, **kwargs)
+        self._pod_storage = pod_storage
         self._sync_lock = threading.Lock()
         self._namespace_lock = threading.Lock()
         self._locked_names: Set[str] = set()
@@ -220,25 +226,25 @@ class AsyncPodNamespace(PodNamespace):
     def __getitem__(self, name: str) -> Object:
         if threading.get_ident() in self._saving_threads:  # Skip activating name for saving tread.
             return dict.__getitem__(self, name)
-        with LockIf(self._namespace_lock, name in self._locked_names):
+        with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
             return PodNamespace.__getitem__(self, name)
 
     def __setitem__(self, name: str, obj: Object) -> None:
         if threading.get_ident() in self._saving_threads:
             return dict.__setitem__(self, name, obj)
-        with LockIf(self._namespace_lock, name in self._locked_names):
+        with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
             return PodNamespace.__setitem__(self, name, obj)
 
     def __delitem__(self, name: str):
         if threading.get_ident() in self._saving_threads:
             return dict.__delitem__(self, name)
-        with LockIf(self._namespace_lock, name in self._locked_names):
+        with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
             return PodNamespace.__delitem__(self, name)
 
     def items(self):
         if threading.get_ident() in self._saving_threads:
             return dict.items(self)
-        with LockIf(self._namespace_lock, len(self._locked_names) > 0):
+        with LockIf(self._namespace_lock, len(self._locked_names) > 0, self._pod_storage._expstat):
             return PodNamespace.items(self)
 
     def lock(self, names: Set[str]) -> None:
@@ -314,15 +320,18 @@ class AsyncPodObjectStorage(PodObjectStorage):
         return AsyncPodObjectStorage.new(pod_dir)
 
     def new_managed_namespace(self, namespace: Namespace = {}) -> Namespace:
-        return AsyncPodNamespace(namespace)
+        return AsyncPodNamespace(self, namespace)
 
     def save(self, namespace: Namespace) -> TimeId:
         assert isinstance(namespace, AsyncPodNamespace)
 
         # Join existing saves first.
         if self._running_save is not None:
+            if self._expstat is not None:
+                join_start_ts = time.time()
             self._running_save.join()
-            self._running_save = None
+            if self._expstat is not None:
+                self._expstat.add_join_time(time.time() - join_start_ts)
 
         # Plan for next namemap.
         __FEATURE__.new_dump()

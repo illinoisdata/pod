@@ -74,9 +74,12 @@ class ExpStat:
     dump_sum_t_s: float = 0.0
     load_sum_t_s: float = 0.0
 
-    total_exec_t_s: float = 0.0
     async_dumps: List[DumpStat] = field(default_factory=lambda: [])
     async_dump_sum_t_s: float = 0.0
+
+    total_exec_t_s: float = 0.0
+    lock_times: List[float] = field(default_factory=lambda: [])
+    join_times: List[float] = field(default_factory=lambda: [])
 
     def add_dump(self, nth: int, time_s: float, storage_b: int) -> None:
         self.dumps.append(
@@ -109,10 +112,6 @@ class ExpStat:
             f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})"
         )
 
-    def add_total_exec_t_s(self, time_s: float) -> None:
-        self.total_exec_t_s = time_s
-        logger.info(f"total_exec_t= {strf_deltatime(time_s)}")
-
     def add_async_dump(self, nth: int, time_s: float, storage_b: int) -> None:
         self.async_dumps.append(
             DumpStat(
@@ -130,12 +129,29 @@ class ExpStat:
             " <async>"
         )
 
+    def add_total_exec_t_s(self, time_s: float) -> None:
+        self.total_exec_t_s = time_s
+        logger.info(f"total_exec_t= {strf_deltatime(time_s)}")
+
+    def add_lock_time(self, time_s: float) -> None:
+        self.lock_times.append(time_s)
+
+    def add_join_time(self, time_s: float) -> None:
+        self.join_times.append(time_s)
+
     def summary(self) -> None:
+        total_lock_time = sum(self.lock_times)
+        total_join_time = sum(self.join_times)
         dump_avg_t_s = float("inf") if len(self.dumps) == 0 else self.dump_sum_t_s / len(self.dumps)
         load_avg_t_s = float("inf") if len(self.loads) == 0 else self.load_sum_t_s / len(self.loads)
         logger.info(
-            f"{len(self.dumps)} dumps"
-            f", avgt= {strf_deltatime(dump_avg_t_s)} ({strf_throughput(1.0/dump_avg_t_s)}), "
+            f"total= {strf_deltatime(self.total_exec_t_s)}, "
+            f"lock= {strf_deltatime(total_lock_time)}, "
+            f"join= {strf_deltatime(total_join_time)}"
+        )
+        logger.info(
+            f"{len(self.dumps)} dumps, "
+            f"avgt= {strf_deltatime(dump_avg_t_s)} ({strf_throughput(1.0/dump_avg_t_s)}), "
             f"s= {strf_storage(self.dumps[-1].storage_b)}"
         )
         logger.info(f"{len(self.loads)} loads" f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})")
