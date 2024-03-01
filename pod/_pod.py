@@ -75,21 +75,26 @@ class PodNamespace(dict):
         dict.__init__(self, *args, **kwargs)
         self.active_names: Set[str] = set(self.keys())
         self.namemap: Namemap = {}
+        self.should_activate: bool = True
 
     def __getitem__(self, name: str) -> Object:
-        self.active_names.add(name)
+        if self.should_activate:
+            self.active_names.add(name)
         return dict.__getitem__(self, name)
 
     def __setitem__(self, name: str, obj: Object) -> None:
-        self.active_names.add(name)
+        if self.should_activate:
+            self.active_names.add(name)
         return dict.__setitem__(self, name, obj)
 
     def __delitem__(self, name: str):
-        self.active_names.discard(name)
+        if self.should_activate:
+            self.active_names.discard(name)
         return dict.__delitem__(self, name)
 
     def items(self):
-        self.active_names = set(self.keys())  # TODO: Use enum for this.
+        if self.should_activate:
+            self.active_names = set(self.keys())  # TODO: Use enum for this.
         return dict.items(self)
 
     def pod_active_names(self) -> Set[str]:
@@ -102,6 +107,9 @@ class PodNamespace(dict):
         assert self.keys() == namemap.keys(), f"{self.keys()}, {namemap.keys()}"
         self.namemap = namemap
         self.active_names.clear()
+
+    def set_activate(self, should_activate: bool):  # To be use under synchronous saving only.
+        self.should_activate = should_activate
 
 
 class PodObjectStorage(ObjectStorage):
@@ -127,12 +135,18 @@ class PodObjectStorage(ObjectStorage):
 
     def save(self, namespace: Namespace) -> TimeId:
         __FEATURE__.new_dump()
-        tid = step_time_id()
-        namemap_pid, namemap = self._save_as_namemap(tid, namespace)
-        self._save_objects(tid, namespace, namemap)
         if isinstance(namespace, PodNamespace):
-            namespace.pod_reset_namemap(namemap)
-        return namemap_pid.tid
+            namespace.set_activate(False)
+        try:
+            tid = step_time_id()
+            namemap_pid, namemap = self._save_as_namemap(tid, namespace)
+            self._save_objects(tid, namespace, namemap)
+            if isinstance(namespace, PodNamespace):
+                namespace.pod_reset_namemap(namemap)
+            return namemap_pid.tid
+        finally:
+            if isinstance(namespace, PodNamespace):
+                namespace.set_activate(True)
 
     def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
         namemap = self._load_namemap(tid)
