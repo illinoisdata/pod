@@ -78,26 +78,21 @@ class PodNamespace(dict):
         dict.__init__(self, *args, **kwargs)
         self.active_names: Set[str] = set(self.keys())
         self.namemap: Namemap = {}
-        self.should_activate: bool = True
 
     def __getitem__(self, name: str) -> Object:
-        if self.should_activate:
-            self.active_names.add(name)
+        self.active_names.add(name)
         return dict.__getitem__(self, name)
 
     def __setitem__(self, name: str, obj: Object) -> None:
-        if self.should_activate:
-            self.active_names.add(name)
+        self.active_names.add(name)
         return dict.__setitem__(self, name, obj)
 
     def __delitem__(self, name: str):
-        if self.should_activate:
-            self.active_names.discard(name)
+        self.active_names.discard(name)
         return dict.__delitem__(self, name)
 
     def items(self):
-        if self.should_activate:
-            self.active_names = set(self.keys())  # TODO: Use enum for this.
+        self.active_names = set(self.keys())  # TODO: Use enum for this.
         return dict.items(self)
 
     def pod_active_names(self) -> Set[str]:
@@ -110,9 +105,6 @@ class PodNamespace(dict):
         assert self.keys() == namemap.keys(), f"{self.keys()}, {namemap.keys()}"
         self.namemap = namemap
         self.active_names.clear()
-
-    def set_activate(self, should_activate: bool):  # To be use under synchronous saving only.
-        self.should_activate = should_activate
 
 
 class PodObjectStorage(ObjectStorage):
@@ -138,18 +130,12 @@ class PodObjectStorage(ObjectStorage):
 
     def save(self, namespace: Namespace) -> TimeId:
         __FEATURE__.new_dump()
+        tid = step_time_id()
+        namemap_pid, namemap = self._save_as_namemap(tid, namespace)
+        self._save_objects(tid, namespace, namemap)
         if isinstance(namespace, PodNamespace):
-            namespace.set_activate(False)
-        try:
-            tid = step_time_id()
-            namemap_pid, namemap = self._save_as_namemap(tid, namespace)
-            self._save_objects(tid, namespace, namemap)
-            if isinstance(namespace, PodNamespace):
-                namespace.pod_reset_namemap(namemap)
-            return namemap_pid.tid
-        finally:
-            if isinstance(namespace, PodNamespace):
-                namespace.set_activate(True)
+            namespace.pod_reset_namemap(namemap)
+        return namemap_pid.tid
 
     def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
         namemap = self._load_namemap(tid)
@@ -167,7 +153,9 @@ class PodObjectStorage(ObjectStorage):
             active_names = self._connected_active_names(tid, namespace)
             prev_namemap = namespace.pod_namemap()
             active_namemap = {
-                name: make_pod_id(tid, object_id(namespace[name])) for name, obj in namespace.items() if name in active_names
+                name: make_pod_id(tid, object_id(dict.__getitem__(namespace, name)))
+                for name in namespace.keys()
+                if name in active_names
             }
             inactive_namemap = {name: prev_namemap[name] for name in namespace.keys() if name not in active_names}
             namemap = {**active_namemap, **inactive_namemap}  # Should contain exactly all names in namespace.
@@ -181,7 +169,7 @@ class PodObjectStorage(ObjectStorage):
         return self._pickling.load(make_pod_id(tid, PodObjectStorage.NAMEMAP_OID))
 
     def _save_objects(self, tid: TimeId, namespace: Namespace, namemap: Namemap) -> None:
-        podspace = {pid: namespace[name] for name, pid in namemap.items() if pid.tid == tid}
+        podspace = {pid: dict.__getitem__(namespace, name) for name, pid in namemap.items() if pid.tid == tid}
         with self._pickling.dump_batch(podspace) as dump_session:
             for pid, obj in podspace.items():  # TODO: Stabilize the order?
                 dump_session.dump(pid, obj)
@@ -351,7 +339,7 @@ class AsyncPodObjectStorage(PodObjectStorage):
         namemap_pid, namemap = self._save_as_namemap(tid, namespace)
 
         # Save asynchronously in a different thread.
-        podspace = {pid: namespace[name] for name, pid in namemap.items() if pid.tid == tid}
+        podspace = {pid: dict.__getitem__(namespace, name) for name, pid in namemap.items() if pid.tid == tid}
         active_names = {name for name, pid in namemap.items() if pid.tid == tid}
         self._running_save = AsyncPodSaveThread(self, namespace, podspace, active_names)
         self._running_save.start()
