@@ -33,6 +33,9 @@ class ObjectStorage:
     def estimate_size(self) -> int:
         raise NotImplementedError("Abstract method")
 
+    def join(self) -> None:
+        pass
+
     def instrument(self, expstat: Optional[ExpStat]) -> None:
         pass
 
@@ -340,12 +343,7 @@ class AsyncPodObjectStorage(PodObjectStorage):
         assert isinstance(namespace, AsyncPodNamespace)
 
         # Join existing saves first.
-        if self._running_save is not None:
-            if self._expstat is not None:
-                join_start_ts = time.time()
-            self._running_save.join()
-            if self._expstat is not None:
-                self._expstat.add_join_time(time.time() - join_start_ts)
+        self.join()
 
         # Plan for next namemap.
         __FEATURE__.new_dump()
@@ -362,6 +360,14 @@ class AsyncPodObjectStorage(PodObjectStorage):
         # Set namemap to the planned one.
         namespace.pod_reset_namemap(namemap)
         return namemap_pid.tid
+
+    def join(self) -> None:
+        if self._running_save is not None:
+            if self._expstat is not None:
+                join_start_ts = time.time()
+            self._running_save.join()
+            if self._expstat is not None:
+                self._expstat.add_join_time(time.time() - join_start_ts)
 
     def instrument(self, expstat: Optional[ExpStat]) -> None:
         self._expstat = expstat

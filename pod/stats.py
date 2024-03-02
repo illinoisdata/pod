@@ -77,7 +77,7 @@ class ExpStat:
     async_dumps: List[DumpStat] = field(default_factory=lambda: [])
     async_dump_sum_t_s: float = 0.0
 
-    total_exec_t_s: float = 0.0
+    exec_times: List[float] = field(default_factory=lambda: [])
     lock_times: List[float] = field(default_factory=lambda: [])
     join_times: List[float] = field(default_factory=lambda: [])
 
@@ -129,9 +129,8 @@ class ExpStat:
             " <async>"
         )
 
-    def add_total_exec_t_s(self, time_s: float) -> None:
-        self.total_exec_t_s = time_s
-        logger.info(f"total_exec_t= {strf_deltatime(time_s)}")
+    def add_exec_time(self, time_s: float) -> None:
+        self.exec_times.append(time_s)
 
     def add_lock_time(self, time_s: float) -> None:
         self.lock_times.append(time_s)
@@ -140,14 +139,17 @@ class ExpStat:
         self.join_times.append(time_s)
 
     def summary(self) -> None:
+        total_lock_exec_time = sum(self.exec_times)
         total_lock_time = sum(self.lock_times)
         total_join_time = sum(self.join_times)
         dump_avg_t_s = float("inf") if len(self.dumps) == 0 else self.dump_sum_t_s / len(self.dumps)
         load_avg_t_s = float("inf") if len(self.loads) == 0 else self.load_sum_t_s / len(self.loads)
         logger.info(
-            f"total= {strf_deltatime(self.total_exec_t_s)}, "
+            f"exec= {strf_deltatime(total_lock_exec_time - total_lock_time)}, "
             f"lock= {strf_deltatime(total_lock_time)}, "
-            f"join= {strf_deltatime(total_join_time)}"
+            f"join= {strf_deltatime(total_join_time)}, "
+            f"save= {strf_deltatime(self.dump_sum_t_s - total_join_time)}, "
+            f"async_save= {strf_deltatime(self.async_dump_sum_t_s)}"
         )
         logger.info(
             f"{len(self.dumps)} dumps, "
