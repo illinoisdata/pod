@@ -8,7 +8,7 @@ import pod.__pickle__  # noqa, isort:skip
 import threading
 import time
 from pathlib import Path
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from pod.common import Object, PodId, TimeId, step_time_id
 from pod.pickling import ManualPodding, PodPickling, SnapshotPodPickling, StaticPodPickling
@@ -195,13 +195,12 @@ class PodObjectStorage(ObjectStorage):
 
 
 class LockIf:
-    def __init__(self, lock: threading.Lock, pred: bool, expstat: Optional[ExpStat]) -> None:
+    def __init__(self, lock: Optional[threading.Lock], expstat: Optional[ExpStat]) -> None:
         self._lock = lock
-        self._pred = pred
         self._expstat = expstat
 
     def __enter__(self) -> LockIf:
-        if self._pred:
+        if self._lock is not None:
             if self._expstat is not None:
                 lock_start_ts = time.time()
             self._lock.__enter__()
@@ -210,7 +209,7 @@ class LockIf:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        if self._pred:
+        if self._lock is not None:
             self._lock.__exit__(exc_type, exc_val, exc_tb)
         return
 
@@ -219,46 +218,65 @@ class AsyncPodNamespace(PodNamespace):
     def __init__(self, pod_storage: AsyncPodObjectStorage, *args, **kwargs) -> None:
         PodNamespace.__init__(self, *args, **kwargs)
         self._pod_storage = pod_storage
-        self._sync_lock = threading.Lock()
-        self._namespace_lock = threading.Lock()
-        self._locked_names: Set[str] = set()
-        self._saving_threads: Set[int] = set()
+        self._all_locks: Set[threading.Lock] = set()
+        self._lock_by_name: Dict[str, threading.Lock] = {}
+        self._names_by_saving_thread: Dict[int, Set[str]] = {}
 
     def __getitem__(self, name: str) -> Object:
-        if threading.get_ident() in self._saving_threads:  # Skip activating name for saving tread.
+        if threading.get_ident() in self._names_by_saving_thread:  # Skip activating name for saving tread.
             return dict.__getitem__(self, name)
-        with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
+        with LockIf(self._lock_by_name.get(name, None), self._pod_storage._expstat):
             return PodNamespace.__getitem__(self, name)
 
     def __setitem__(self, name: str, obj: Object) -> None:
-        if threading.get_ident() in self._saving_threads:
+        if threading.get_ident() in self._names_by_saving_thread:
             return dict.__setitem__(self, name, obj)
-        with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
+        with LockIf(self._lock_by_name.get(name, None), self._pod_storage._expstat):
             return PodNamespace.__setitem__(self, name, obj)
 
     def __delitem__(self, name: str):
-        if threading.get_ident() in self._saving_threads:
+        if threading.get_ident() in self._names_by_saving_thread:
             return dict.__delitem__(self, name)
-        with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
+        with LockIf(self._lock_by_name.get(name, None), self._pod_storage._expstat):
             return PodNamespace.__delitem__(self, name)
 
     def items(self):
-        if threading.get_ident() in self._saving_threads:
+        if threading.get_ident() in self._names_by_saving_thread:
+            # Assuming saving threads do not mutate namespace.
             return dict.items(self)
-        with LockIf(self._namespace_lock, len(self._locked_names) > 0, self._pod_storage._expstat):
+
+        if self._pod_storage._expstat is not None:
+            lock_start_ts = time.time()
+        for lock in list(self._all_locks):
+            lock.acquire()
+        if self._pod_storage._expstat is not None:
+            self._pod_storage._expstat.add_lock_time(time.time() - lock_start_ts)
+        try:
             return PodNamespace.items(self)
+        finally:
+            for lock in self._all_locks:
+                lock.release()
 
     def lock(self, names: Set[str]) -> None:
-        with self._sync_lock:
-            assert self._namespace_lock.acquire(blocking=False)
-            self._locked_names = names
-            self._saving_threads.add(threading.get_ident())
+        assert len(names) > 0
+        assert all(name not in self._lock_by_name for name in names)
+        lock = threading.Lock()
+        lock.acquire()
+        self._all_locks.add(lock)
+        for name in names:
+            self._lock_by_name[name] = lock
+        self._names_by_saving_thread[threading.get_ident()] = names
 
     def release(self) -> None:
-        with self._sync_lock:
-            self._namespace_lock.release()
-            self._locked_names.clear()
-            self._saving_threads.discard(threading.get_ident())
+        names = self._names_by_saving_thread.pop(threading.get_ident())
+        lock = self._lock_by_name[next(iter(names))]
+        lock.release()
+        self._all_locks.discard(lock)
+        for name in names:
+            del self._lock_by_name[name]
+
+    def _is_saving_thread(self, name) -> bool:
+        return name in self._names_by_saving_thread.get(threading.get_ident(), {})
 
 
 class AsyncPodSaveThread(threading.Thread):
@@ -288,7 +306,8 @@ class AsyncPodSaveThread(threading.Thread):
 
     def run(self):
         # Lock and wait at barrier to continue with the main thread.
-        self._namespace.lock(self._active_names)
+        if len(self._active_names) > 0:  # No locking needed if no active name.
+            self._namespace.lock(self._active_names)
         self.wait_run_barrier()
 
         if self._pod_storage._expstat is not None:
@@ -299,13 +318,13 @@ class AsyncPodSaveThread(threading.Thread):
             dump_session.dump(self._namemap_pid, self._namemap)
             for pid, obj in self._podspace.items():
                 dump_session.dump(pid, obj)
-            self._namespace.release()
+            if len(self._active_names) > 0:  # No locking needed if no active name.
+                self._namespace.release()
 
         if self._pod_storage._expstat is not None:
             dump_end_ts = time.time()
-            self._pod_storage._save_count += 1
             self._pod_storage._expstat.add_async_dump(
-                nth=self._pod_storage._save_count,
+                nth=self._tid,
                 time_s=dump_end_ts - dump_start_ts,
                 storage_b=self._pod_storage.estimate_size(),
             )
@@ -319,10 +338,9 @@ class AsyncPodObjectStorage(PodObjectStorage):
 
     def __init__(self, pickling: PodPickling) -> None:
         PodObjectStorage.__init__(self, pickling)
-        self._running_save: Optional[threading.Thread] = None
+        self._save_threads: List[threading.Thread] = []
 
         self._expstat: Optional[ExpStat] = None
-        self._save_count: int = 0
 
     @staticmethod
     def new(pod_dir: Path) -> PodObjectStorage:
@@ -334,29 +352,29 @@ class AsyncPodObjectStorage(PodObjectStorage):
     def save(self, namespace: Namespace) -> TimeId:
         assert isinstance(namespace, AsyncPodNamespace)
 
-        # Join existing saves first.
-        self.join()
-
         # Plan for next namemap.
         tid = step_time_id()
         namemap_pid, namemap = self._save_as_namemap(tid, namespace)
 
         # Save asynchronously in a different thread.
-        self._running_save = AsyncPodSaveThread(self, tid, namespace, namemap_pid, namemap)
-        self._running_save.start()
-        self._running_save.wait_run_barrier()
+        # Allow multiple threads to run save at a time.
+        save_thread = AsyncPodSaveThread(self, tid, namespace, namemap_pid, namemap)
+        save_thread.start()
+        save_thread.wait_run_barrier()
+        self._save_threads.append(save_thread)
 
         # Set namemap to the planned one.
         namespace.pod_reset_namemap(namemap)
         return namemap_pid.tid
 
     def join(self) -> None:
-        if self._running_save is not None:
-            if self._expstat is not None:
-                join_start_ts = time.time()
-            self._running_save.join()
-            if self._expstat is not None:
-                self._expstat.add_join_time(time.time() - join_start_ts)
+        if self._expstat is not None:
+            join_start_ts = time.time()
+        for save_thread in self._save_threads:
+            save_thread.join()
+        self._save_threads.clear()
+        if self._expstat is not None:
+            self._expstat.add_join_time(time.time() - join_start_ts)
 
     def instrument(self, expstat: Optional[ExpStat]) -> None:
         self._expstat = expstat

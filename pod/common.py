@@ -1,5 +1,6 @@
 from __future__ import annotations  # isort:skip
 
+import threading
 from dataclasses import dataclass
 from typing import Any, Dict, Set
 
@@ -80,3 +81,13 @@ def plot_deps(deps: Dict[PodId, PodDependency]):
         for dep_pid in dep.dep_pids:
             ps.edge(str(pid), str(dep_pid))
     ps.view()
+
+
+def synchronize(fn):
+    lock = threading.Lock()
+
+    def sync_fn(*args, **kwargs):
+        with lock:
+            return fn(*args, **kwargs)
+
+    return sync_fn

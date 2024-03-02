@@ -171,8 +171,12 @@ class RandomMutatingListCells(NotebookCells):
 
         # Mutate elements randomly.
         return (
-            f"for idx in random.sample(range(len(l)), {self.num_elem_mutate}):\n"
-            f"  l[idx] = secrets.token_bytes({self.elem_size})"
+            (
+                f"for idx in random.sample(range(len(l)), {self.num_elem_mutate}):\n"
+                f"  l[idx] = secrets.token_bytes({self.elem_size})"
+            )
+            if idx % 2 == 0
+            else (f"l_share[{idx} % len(l_share)] = b'0' * {self.elem_size}")
         )
 
     def __len__(self) -> int:

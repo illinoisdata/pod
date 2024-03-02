@@ -8,7 +8,7 @@ from typing import Dict, List, Set, Union
 from dataclasses_json import dataclass_json
 from loguru import logger
 
-from pod.common import Object, PodId, TimeId
+from pod.common import Object, PodId, synchronize, TimeId
 
 
 def strf_deltatime(time_s: float) -> str:
@@ -114,6 +114,7 @@ class ExpStat:
             f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})"
         )
 
+    @synchronize
     def add_async_dump(self, nth: int, time_s: float, storage_b: int) -> None:
         self.async_dumps.append(
             DumpStat(

@@ -23,7 +23,7 @@ from loguru import logger
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 from pod.algo import union_find
-from pod.common import PodDependency, PodId
+from pod.common import PodDependency, PodId, synchronize
 
 POD_CACHE_SIZE = 32_000_000_000
 
@@ -412,24 +412,28 @@ class FilePodStorage(PodStorage):
     def estimate_size(self) -> int:
         return sum(f.stat().st_size for f in self.root_dir.glob("**/*") if f.is_file())
 
+    @synchronize
     def next_pod_page_idx(self) -> int:
         page_idx = self.stats.pod_page_count
         self.stats.pod_page_count += 1
         self.write_stats()
         return page_idx
 
+    @synchronize
     def next_dep_page_idx(self) -> int:
         page_idx = self.stats.dep_page_count
         self.stats.dep_page_count += 1
         self.write_stats()
         return page_idx
 
+    @synchronize
     def next_pid_index_page_idx(self) -> int:
         page_idx = self.stats.pid_index_page_count
         self.stats.pid_index_page_count += 1
         self.write_stats()
         return page_idx
 
+    @synchronize
     def next_pid_synonym_page_idx(self) -> int:
         page_idx = self.stats.pid_synonym_page_count
         self.stats.pid_synonym_page_count += 1
