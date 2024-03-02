@@ -185,6 +185,9 @@ class NotebookExecutor:
         self.the_globals["__spec__"] = None
         self.the_globals["__builtins__"] = globals()["__builtins__"]
 
+    def num_cells(self) -> int:
+        return len(self.cells)
+
     def iter(self) -> Generator[Tuple[NotebookCell, dict, dict], None, None]:
         for cell in self.cells.iter():
             try:
@@ -295,8 +298,14 @@ def run_exp1_impl(args: BenchArgs) -> None:
 
     # Dumps all steps.
     tids: List[TimeId] = []
+    nb_exec_step = nb_exec.iter()
     exec_start_ts = time.time()
-    for nth, (cell, the_globals, the_locals) in enumerate(nb_exec.iter()):
+    for nth in range(nb_exec.num_cells()):
+        # Execute next cell.
+        exec_start_ts = time.time()
+        cell, the_globals, the_locals = next(nb_exec_step)
+        exec_stop_ts = time.time()
+
         # Dump current state.
         dump_start_ts = time.time()
         tid = sut.save(the_locals)
@@ -304,6 +313,7 @@ def run_exp1_impl(args: BenchArgs) -> None:
 
         # Record measurements.
         tids.append(tid)
+        expstat.add_exec_time(exec_stop_ts - exec_start_ts)
         expstat.add_dump(
             nth=nth,
             time_s=dump_stop_ts - dump_start_ts,
@@ -312,8 +322,7 @@ def run_exp1_impl(args: BenchArgs) -> None:
 
         # Reset environment to reduce noise.
         gc.collect()
-    exec_stop_ts = time.time()
-    expstat.add_total_exec_t_s(exec_stop_ts - exec_start_ts)
+    sut.join()
     logger.info(f"Collected tids {tids}")
 
     # Save partial results (in case of load failure).
