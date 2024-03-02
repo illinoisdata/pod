@@ -132,7 +132,7 @@ class PodObjectStorage(ObjectStorage):
         __FEATURE__.new_dump()
         tid = step_time_id()
         namemap_pid, namemap = self._save_as_namemap(tid, namespace)
-        self._save_objects(tid, namespace, namemap)
+        self._save_objects(tid, namespace, namemap_pid, namemap)
         if isinstance(namespace, PodNamespace):
             namespace.pod_reset_namemap(namemap)
         return namemap_pid.tid
@@ -161,16 +161,15 @@ class PodObjectStorage(ObjectStorage):
             namemap = {**active_namemap, **inactive_namemap}  # Should contain exactly all names in namespace.
         else:
             namemap = {name: make_pod_id(tid, object_id(obj)) for name, obj in namespace.items()}
-        with self._pickling.dump_batch({namemap_pid: namemap}) as dump_session:
-            dump_session.dump(namemap_pid, namemap)
         return namemap_pid, namemap
 
     def _load_namemap(self, tid: TimeId) -> Namemap:
         return self._pickling.load(make_pod_id(tid, PodObjectStorage.NAMEMAP_OID))
 
-    def _save_objects(self, tid: TimeId, namespace: Namespace, namemap: Namemap) -> None:
+    def _save_objects(self, tid: TimeId, namespace: Namespace, namemap_pid: PodId, namemap: Namemap) -> None:
         podspace = {pid: dict.__getitem__(namespace, name) for name, pid in namemap.items() if pid.tid == tid}
-        with self._pickling.dump_batch(podspace) as dump_session:
+        with self._pickling.dump_batch({namemap_pid: namemap_pid, **podspace}) as dump_session:
+            dump_session.dump(namemap_pid, namemap)
             for pid, obj in podspace.items():  # TODO: Stabilize the order?
                 dump_session.dump(pid, obj)
 
@@ -269,17 +268,24 @@ class AsyncPodSaveThread(threading.Thread):
     def __init__(
         self,
         pod_storage: AsyncPodObjectStorage,
+        tid: TimeId,
         namespace: AsyncPodNamespace,
-        podspace: Dict[PodId, Object],
-        active_names: Set[str],
+        namemap_pid: PodId,
+        namemap: Namemap,
         *args,
         **kwargs,
     ):
         threading.Thread.__init__(self, *args, **kwargs)
         self._pod_storage = pod_storage
+        self._tid = tid
         self._namespace = namespace
-        self._podspace = podspace
-        self._active_names = active_names
+        self._namemap_pid = namemap_pid
+        self._namemap = namemap
+
+        self._podspace = {
+            pid: dict.__getitem__(self._namespace, name) for name, pid in self._namemap.items() if pid.tid == self._tid
+        }
+        self._active_names = {name for name, pid in self._namemap.items() if pid.tid == self._tid}
 
         self._run_barrier = threading.Barrier(2, timeout=5)  # This should be quick (<1 second).
 
@@ -292,7 +298,8 @@ class AsyncPodSaveThread(threading.Thread):
             dump_start_ts = time.time()
 
         # Actual saving.
-        with self._pod_storage._pickling.dump_batch(self._podspace) as dump_session:
+        with self._pod_storage._pickling.dump_batch({self._namemap_pid: self._namemap, **self._podspace}) as dump_session:
+            dump_session.dump(self._namemap_pid, self._namemap)
             for pid, obj in self._podspace.items():
                 dump_session.dump(pid, obj)
             self._namespace.release()
@@ -339,9 +346,7 @@ class AsyncPodObjectStorage(PodObjectStorage):
         namemap_pid, namemap = self._save_as_namemap(tid, namespace)
 
         # Save asynchronously in a different thread.
-        podspace = {pid: dict.__getitem__(namespace, name) for name, pid in namemap.items() if pid.tid == tid}
-        active_names = {name for name, pid in namemap.items() if pid.tid == tid}
-        self._running_save = AsyncPodSaveThread(self, namespace, podspace, active_names)
+        self._running_save = AsyncPodSaveThread(self, tid, namespace, namemap_pid, namemap)
         self._running_save.start()
         self._running_save.wait_run_barrier()
 
