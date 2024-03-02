@@ -322,7 +322,19 @@ def run_exp1_impl(args: BenchArgs) -> None:
 
         # Reset environment to reduce noise.
         gc.collect()
+
+    # Wait until all background dumps are done.
+    dump_start_ts = time.time()
     sut.join()
+    dump_stop_ts = time.time()
+    expstat.add_dump(
+        nth=nth + 1,
+        time_s=dump_stop_ts - dump_start_ts,
+        storage_b=sut.estimate_size(),
+    )
+
+    # Early summary
+    expstat.summary()
     logger.info(f"Collected tids {tids}")
 
     # Save partial results (in case of load failure).
