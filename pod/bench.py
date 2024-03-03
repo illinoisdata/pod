@@ -136,10 +136,10 @@ class RandomMutatingListCells(NotebookCells):
             return (
                 "import secrets\n"
                 "import random\n"
-                # "def f():\n"  # Test pickling functions.
-                # "  def g():\n"
-                # "    return 0\n"
-                # "  return 0\n"
+                "def f():\n"  # Test pickling functions.
+                "  def g():\n"
+                "    return 0\n"
+                "  return 0\n"
                 f"lc = secrets.token_bytes({self.list_size} * {self.elem_size})\n"
                 "l = [\n"
                 f"  secrets.token_bytes({self.elem_size})\n"
