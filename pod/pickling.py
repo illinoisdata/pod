@@ -422,6 +422,7 @@ class BaseStaticPodPickler(BasePickler):
     )
 
     def __init__(self, *args, **kwargs) -> None:
+        kwargs["recurse"] = True  # Always recurse to analyze referred global variables (e.g., in functions)
         BasePickler.__init__(self, *args, **kwargs)
 
     def get_root_dep(self) -> PodDependency:
