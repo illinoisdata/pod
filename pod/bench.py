@@ -296,6 +296,9 @@ def run_exp1_impl(args: BenchArgs) -> None:
     expstat = ExpStat()
     sut.instrument(expstat)
 
+    # Disable GC to reduce noise.
+    gc.disable()
+
     # Dumps all steps.
     tids: List[TimeId] = []
     nb_exec_step = nb_exec.iter()
@@ -320,9 +323,6 @@ def run_exp1_impl(args: BenchArgs) -> None:
             storage_b=sut.estimate_size(),
         )
 
-        # Reset environment to reduce noise.
-        gc.collect()
-
     # Wait until all background dumps are done.
     dump_start_ts = time.time()
     sut.join()
@@ -332,6 +332,9 @@ def run_exp1_impl(args: BenchArgs) -> None:
         time_s=dump_stop_ts - dump_start_ts,
         storage_b=sut.estimate_size(),
     )
+
+    # Collect once before test loading.
+    gc.collect()
 
     # Early summary
     expstat.summary()
@@ -363,6 +366,9 @@ def run_exp1_impl(args: BenchArgs) -> None:
         del the_locals
         gc.collect()
     expstat.summary()
+
+    # No more measurement, re-enable now.
+    gc.enable()
 
     # Write results
     result_path = expstat.save(args.result_dir / args.expname / "expstat.json")
