@@ -11,6 +11,7 @@ from functools import partial
 from multiprocessing import Process, Queue
 from pathlib import Path
 from typing import List
+import json
 
 import numpy as np
 from loguru import logger
@@ -49,15 +50,20 @@ def run_iter(nb_path, update_q: Queue):
     sut = SnapshotPodPickling(Path(f"tmp/pod{save_file_str}"))
 
     sizes = []
+    times = []
     last_storage_size = 0
     # expstat = ExpStat()
     pids: List[PodId] = []
     for nth, (cell, the_globals, the_locals) in enumerate(nb_exec.iter()):
         # Dump current state.
+        dump_start_ts = time.time()
         pid = sut.dump(the_locals)
+        dump_stop_ts = time.time()
 
         # Record measurements.
         cur_size = sut.estimate_size()
+        dump_time = dump_stop_ts - dump_start_ts
+        times.append(dump_time)
         pids.append(pid)
         size = cur_size - last_storage_size
         last_storage_size = cur_size
@@ -65,8 +71,8 @@ def run_iter(nb_path, update_q: Queue):
         # Reset environment to reduce noise.
         gc.collect()
 
-    update_q.put(cur_size)
-    # update_q.put({"nb": nb_path, "sizes" : sizes, "final size" : cur_size})
+    update_q.put({"nb": nb_path, "sizes" : sizes, "times" : times, "final_size" : cur_size})
+    print("DONE")
     return
 
 
@@ -78,40 +84,41 @@ def find_bench_size(nbs):
         p = Process(target=run_iter, args=(nb_path, update_q))
         procs.append(p)
         try:
+            print("STARTING PROC")
             p.start()
         except:
             logger.info("ERROR STARTING PROCESS")
             return
 
-    sizes = []
+    global_data = {}
     popped = 0
     while popped < len(nbs):
-        size = update_q.get()
+        print("GETTING FROM UPD")
+        data = update_q.get()
         popped += 1
-        sizes.append(size)
-
+        global_data[data["nb"]] = {"sizes" : data["sizes"], "times" : data["times"], "final_size" : data["final_size"]}
     for p in procs:
         try:
             p.join()
         except:
             logger.info("ERROR JOINING")
-    return sum(sizes) / len(sizes)
+    return global_data
 
 
 if __name__ == "__main__":
     # logger.info(f"Arguments {sys.argv}")
-    size = find_bench_size(
+    bench_data = find_bench_size(
         [
-            "notebooks/simple.ipynb",
             "notebooks/it-s-that-time-of-the-year-again.ipynb",
             "notebooks/better-xgb-baseline.ipynb",
             "notebooks/fast-fourier-transform-denoising.ipynb",
             "notebooks/cv19w3-2-v2-play-2-v3fix-sub-last6dayopt.ipynb",
             # "notebooks/amex-dataset.ipynb",
             "notebooks/denoising-with-direct-wavelet-transform.ipynb",
-            "notebooks/numpy.ipynb",
             "notebooks/04_training_linear_models.ipynb",
         ]
     )
-    with open("benchsize.txt", "w") as f:
-        f.write(str(size))
+    json_object = json.dumps(bench_data, indent=4)
+    with open("benchdata.json", "w") as f:
+        print("WRITING")
+        f.write(json_object)

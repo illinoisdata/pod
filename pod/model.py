@@ -22,7 +22,7 @@ class PoddingModel:
 
 
 class QLearningPoddingModel(PoddingModel):
-    SIMPLE_TYPES = [
+    SIMPLE_TYPES = [t.__name__ for t in [
         float,
         int,
         complex,
@@ -30,12 +30,11 @@ class QLearningPoddingModel(PoddingModel):
         tuple,
         NoneType,
         type,
-    ]
+    ]]
 
     SIMPLE_TYPE = "SIMPLE_TYPE"
     OTHER = "other"
-    TYPES = [
-        SIMPLE_TYPE,
+    TYPES = [SIMPLE_TYPE] + [t.__name__ for t in [
         list,
         dict,
         str,
@@ -46,10 +45,9 @@ class QLearningPoddingModel(PoddingModel):
         FunctionType,
         ModuleType,
         CodeType,
-        OTHER,
-    ]
+    ]] + [OTHER]
 
-    SPLIT_TYPES = (
+    SPLIT_TYPES = [t.__name__ for t in [
         # Builtin types.
         str,
         bytes,
@@ -61,10 +59,9 @@ class QLearningPoddingModel(PoddingModel):
         matplotlib.figure.Figure,
         # Nested types.
         FunctionType,
-        ModuleType,
         CodeType,
-    )
-    FINAL_TYPES = (
+    ]]
+    FINAL_TYPES = [t.__name__ for t in [
         # Builtin types.
         str,
         bytes,
@@ -72,13 +69,16 @@ class QLearningPoddingModel(PoddingModel):
         np.ndarray,
         pd.DataFrame,
         matplotlib.figure.Figure,
-    )
+        ModuleType,
+    ]]
 
     SIZES = [1_000_000_000, 1_000_000, 1_000, 100, 1, -2]
     PROBABILITIES = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]
-
+    ACTION_CHOICES = list(range(len(list(PodAction)))) + [-1]
+    actions = list(PodAction)
     def __init__(self, qt_path=None, train=False, alpha=0.2, gamma=0.8):
         self.state_to_qt_idx = {}
+        self.action_history = {}
         idx = 0
         self.actions = list(PodAction)
         num_rows_qt = (
@@ -88,6 +88,7 @@ class QLearningPoddingModel(PoddingModel):
             * len(QLearningPoddingModel.PROBABILITIES)
             * len(QLearningPoddingModel.PROBABILITIES)
             * len(QLearningPoddingModel.TYPES)
+            * len(QLearningPoddingModel.ACTION_CHOICES)
         )
 
         if qt_path is not None:
@@ -96,7 +97,9 @@ class QLearningPoddingModel(PoddingModel):
         else:
             self.q_table = np.zeros((num_rows_qt, len(self.actions)))
 
-        for idx, (has_changed, obj_s, pod_s, pod_max_change_prob, oid_change_prob, obj_type) in enumerate(
+        self.pod_action_to_action = {self.actions[i]: i for i in range(len(self.actions))}
+
+        for idx, (has_changed, obj_s, pod_s, pod_max_change_prob, oid_change_prob, obj_type, past_action) in enumerate(
             product(
                 [True, False],
                 QLearningPoddingModel.SIZES,
@@ -104,17 +107,13 @@ class QLearningPoddingModel(PoddingModel):
                 QLearningPoddingModel.PROBABILITIES,
                 QLearningPoddingModel.PROBABILITIES,
                 QLearningPoddingModel.TYPES,
+                QLearningPoddingModel.ACTION_CHOICES,
             )
         ):
-            self.state_to_qt_idx[(has_changed, obj_s, pod_s, pod_max_change_prob, oid_change_prob, obj_type)] = idx
+            self.state_to_qt_idx[(has_changed, obj_s, pod_s, pod_max_change_prob, oid_change_prob, obj_type, past_action)] = idx
             if qt_path is None:
-                self._set_inductive_bias(obj_type, idx)
+                self._set_inductive_bias(obj_type, idx, has_changed, past_action)
 
-        print(self.q_table.shape)
-        self.nnz_qtable = []
-
-        self.feature_collector = FeatureCollectorModel("", None)
-        self.pod_action_to_action = {self.actions[i]: i for i in range(len(self.actions))}
         self.train = train
         self.features = {
             "oid": [],
@@ -126,6 +125,7 @@ class QLearningPoddingModel(PoddingModel):
             "obj_type": [],
             "obj_len": [],
             "has_changed": [],
+            "past_action" : []
         }
 
         if self.train:
@@ -137,16 +137,16 @@ class QLearningPoddingModel(PoddingModel):
             self.size_history = []
             self.dump_time_history = []
 
-    def _set_inductive_bias(self, obj_type, idx):
+    def _set_inductive_bias(self, obj_type, idx, has_changed, past_action):
         if obj_type == QLearningPoddingModel.SIMPLE_TYPE:
-            self.q_table[idx, :] -= 5
-            self.q_table[idx, 0] += 10  # 0 is bundle
+            self.q_table[idx, self.pod_action_to_action[PodAction.bundle]] += 10
         elif obj_type in QLearningPoddingModel.FINAL_TYPES:
-            self.q_table[idx, :] -= 5
-            self.q_table[idx, 2] += 10  # 2 is final
+            self.q_table[idx, self.pod_action_to_action[PodAction.split_final]] += 10
         elif obj_type in QLearningPoddingModel.SPLIT_TYPES:
-            self.q_table[idx, :] -= 5
-            self.q_table[idx, 1] += 10  # 1 is split
+            self.q_table[idx, self.pod_action_to_action[PodAction.split]] += 10
+        if not has_changed:
+            if past_action != -1:
+                self.q_table[idx, past_action] += 20
 
     def get_features(self, obj, pickler):
         self.features["oid"].append(id(obj))
@@ -157,6 +157,7 @@ class QLearningPoddingModel(PoddingModel):
         self.features["oid_change_prob"].append(__FEATURE__.oid_change_prob(id(obj)))
         self.features["obj_type"].append(type(obj).__name__)
         self.features["obj_len"].append(self._get_obj_len(obj))
+        self.features["past_action"].append(self.action_history.get(id(obj), -1))
         return self.features
 
     def _get_obj_len(self, obj: Object) -> Optional[int]:
@@ -198,7 +199,9 @@ class QLearningPoddingModel(PoddingModel):
             # self.history.append((q_table_idx, action_idx))
             if history_list:
                 history_list.append((q_table_idx, action_idx))
+        self.action_history[id(obj)] = action_idx
         return self.actions[action_idx]
+  
 
     def post_podding_fn(self) -> None:
         for oid in self.features["oid"][len(self.features["has_changed"]) :]:
@@ -212,11 +215,12 @@ class QLearningPoddingModel(PoddingModel):
         obj_size, pod_size = self._get_size_values(features)
         pod_max_change_prob, oid_change_prob = self._get_prob_values(features)
         obj_type = features["obj_type"][-1]
+        past_action = features["past_action"][-1]
         if obj_type in QLearningPoddingModel.SIMPLE_TYPES:
             obj_type = QLearningPoddingModel.SIMPLE_TYPE
-        if obj_type not in QLearningPoddingModel.TYPES:
+        elif obj_type not in QLearningPoddingModel.TYPES:
             obj_type = QLearningPoddingModel.OTHER
-        state = (has_changed, obj_size, pod_size, pod_max_change_prob, oid_change_prob, obj_type)
+        state = (has_changed, obj_size, pod_size, pod_max_change_prob, oid_change_prob, obj_type, past_action)
         return self.state_to_qt_idx[state]
 
     def _get_size_values(self, features):
@@ -258,6 +262,9 @@ class QLearningPoddingModel(PoddingModel):
                 else:
                     oid_change_prob = lo_p
         return max(pod_max_change_prob, 0.0), max(oid_change_prob, 0.0)
+    
+    def clear_action_history(self):
+        self.action_history = {}
 
     def batch_update_q(self, reward):
         # logger.info(f"UPDATING ON {len(self.history)} ITEMS")
@@ -297,18 +304,26 @@ class QLearningPoddingModel(PoddingModel):
         plt.clf()
         plt.figure()
         plt.plot(self.reward_history)
-        plt.xlabel("Dump")
-        plt.ylabel("Reward")
+        plt.xlabel("Epoch")
+        plt.ylabel("Avg. Reward")
         plt.savefig(f"reward_plot_{name}.png")
 
         plt.cla()
         plt.clf()
         plt.figure()
         plt.plot(self.size_history)
-        plt.xlabel("epoch")
-        plt.ylabel("size")
+        plt.xlabel("Epoch")
+        plt.ylabel("Avg Storage Size")
         plt.savefig(f"size_{name}.png")
         plt.show()
+
+        plt.cla()
+        plt.clf()
+        plt.figure()
+        plt.plot(self.dump_time_history)
+        plt.xlabel("Epoch")
+        plt.ylabel("Avg dump time")
+        plt.savefig(f"dump_time_{name}.png")
 
 
 class RandomPoddingModel:
