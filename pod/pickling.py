@@ -12,17 +12,29 @@ from dataclasses import dataclass
 from types import CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-import dill as pickle
 import matplotlib.figure
 import numpy as np
 import pandas as pd
-from dill import Pickler as BasePickler
-from dill import Unpickler as BaseUnpickler
 from loguru import logger
 
 from pod.common import Object, ObjectId, PodDependency, PodId, TimeId, make_pod_id, next_rank, object_id, step_time_id
 from pod.feature import __FEATURE__
 from pod.storage import PodReader, PodStorage, PodWriter
+
+if pod.__pickle__.BASE_PICKLE == "dill":
+    import dill as pickle
+    from dill import Pickler as BasePickler
+    from dill import Unpickler as BaseUnpickler
+elif pod.__pickle__.BASE_PICKLE == "cloudpickle":
+    from pickle import _Unpickler as BaseUnpickler
+
+    import cloudpickle as pickle
+    from cloudpickle import Pickler as BasePickler
+else:  # USE_PICKLE
+    import pickle
+    from pickle import Pickler as BasePickler
+    from pickle import Unpickler as BaseUnpickler
+
 
 try:
     from types import NoneType
@@ -422,7 +434,9 @@ class BaseStaticPodPickler(BasePickler):
     )
 
     def __init__(self, *args, **kwargs) -> None:
-        kwargs["recurse"] = True  # Always recurse to analyze referred global variables (e.g., in functions)
+        if pod.__pickle__.BASE_PICKLE == "dill":
+            # Always recurse to analyze referred global variables (e.g., in functions).
+            kwargs["recurse"] = True
         BasePickler.__init__(self, *args, **kwargs)
 
     def get_root_dep(self) -> PodDependency:
