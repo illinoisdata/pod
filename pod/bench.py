@@ -18,7 +18,7 @@ from loguru import logger
 from pod._pod import AsyncPodObjectStorage, ObjectStorage, PodObjectStorage, SnapshotObjectStorage
 from pod.common import TimeId
 from pod.feature import __FEATURE__
-from pod.model import FeatureCollectorModel, RandomPoddingModel
+from pod.model import FeatureCollectorModel, GreedyPoddingModel, RandomPoddingModel
 from pod.pickling import (
     ManualPodding,
     PoddingFunction,
@@ -77,6 +77,9 @@ class BenchArgs:
     """ Learning, model, feature """
     podding_model: str = "manual"  # Model name to use for podding function.
     enable_feature: bool = False  # Whether to enable feature extraction
+
+    # Cost model.
+    cm_pod_overhead: float = 120  # Overhead for each pod (bytes per save).
 
 
 """ Notebook handler/executor """
@@ -224,11 +227,14 @@ class SUT:
     def podding_model(args: BenchArgs) -> Tuple[PoddingFunction, Optional[PostPoddingFunction]]:
         if args.podding_model == "manual":
             return ManualPodding.podding_fn, None
+        elif args.podding_model == "greedy":
+            g_model = GreedyPoddingModel(pod_overhead=args.cm_pod_overhead)
+            return g_model.podding_fn, g_model.post_podding_fn
         elif args.podding_model == "random":
             return RandomPoddingModel().podding_fn, None
         elif args.podding_model == "manual-collect":
-            model = FeatureCollectorModel(args.result_dir / args.expname / "manual-collect.csv", ManualPodding.podding_fn)
-            return model.podding_fn, model.post_podding_fn
+            fc_model = FeatureCollectorModel(args.result_dir / args.expname / "manual-collect.csv", ManualPodding.podding_fn)
+            return fc_model.podding_fn, fc_model.post_podding_fn
         raise ValueError(f'Invalid model name "{args.podding_model}"')
 
     @staticmethod
