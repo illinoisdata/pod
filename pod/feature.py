@@ -23,16 +23,26 @@ class ChangeTracker:
         self._prev_pod_set: Set[bytes] = set()
         self._pod_set: Set[bytes] = set()
         self._pod_oids: Dict[PodId, Set[ObjectId]] = {}
+        self._pod_sizes: Dict[PodId, Tuple[int, int]] = {}
         self._pod_max_change_prob: Dict[PodId, float] = {}
         self._oid_recent_change: Set[ObjectId] = set()
+        self._pod_change: Set[PodId] = set()
 
         self._oid_count: Dict[ObjectId, int] = {}
         self._oid_change_count: Dict[ObjectId, int] = {}
 
     def new_dump(self):
-        self._prev_pod_set = self._pod_set
-        self._pod_set = set()
+        from functools import reduce
+        # summarize = lambda x: (reduce(lambda a, b: (a[0] + b[0], a[1] + b[1]), x, (0, 0)), sorted(x, key=lambda y: -y[1]))
+        def summarize(x):
+            a, b = reduce(lambda a, b: (a[0] + b[0], a[1] + b[1]), x, (0, 0))
+            return len(x), a, b / 1e6
+        print("STABLE", summarize([v for pid, v in self._pod_sizes.items() if pid not in self._pod_change]))
+        print("CHANGE", summarize([v for pid, v in self._pod_sizes.items() if pid in self._pod_change]))
+        self._prev_pod_set |= self._pod_set
+        # self._pod_set = set()
         self._pod_oids = {}
+        self._pod_sizes = {}
         self._oid_recent_change = set()
         self._pod_max_change_prob = {}
 
@@ -47,7 +57,11 @@ class ChangeTracker:
 
     def new_pod(self, pid: PodId, pod_bytes: bytes):
         self._pod_set.add(pod_bytes)
+        self._pod_sizes[pid] = len(self._pod_oids[pid]), len(pod_bytes)
+        # print(pid, self._pod_sizes[pid])
         is_changed = pod_bytes not in self._prev_pod_set
+        if is_changed:
+            self._pod_change.add(pid)
         for oid in self._pod_oids[pid]:
             if oid not in self._oid_count:
                 self._oid_count[oid] = 0

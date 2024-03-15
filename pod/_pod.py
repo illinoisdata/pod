@@ -129,7 +129,6 @@ class PodObjectStorage(ObjectStorage):
         return PodNamespace(namespace)
 
     def save(self, namespace: Namespace) -> TimeId:
-        __FEATURE__.new_dump()
         tid = step_time_id()
         namemap_pid, namemap = self._save_as_namemap(tid, namespace)
         self._save_objects(tid, namespace, namemap_pid, namemap)
@@ -151,6 +150,7 @@ class PodObjectStorage(ObjectStorage):
 
         if isinstance(namespace, PodNamespace):
             active_names = self._connected_active_names(tid, namespace)
+            # print(active_names)
             prev_namemap = namespace.pod_namemap()
             active_namemap = {
                 name: make_pod_id(tid, object_id(dict.__getitem__(namespace, name)))
@@ -341,7 +341,6 @@ class AsyncPodObjectStorage(PodObjectStorage):
         self.join()
 
         # Plan for next namemap.
-        __FEATURE__.new_dump()
         tid = step_time_id()
         namemap_pid, namemap = self._save_as_namemap(tid, namespace)
 

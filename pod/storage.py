@@ -131,7 +131,7 @@ class PodBytesMemo:
     def new(max_size: int) -> PodBytesMemo:
         return PodBytesMemo(
             max_size=max_size,
-            min_size=128,
+            min_size=0,
             size=0,
             memo_page={},
         )
@@ -248,6 +248,8 @@ class FilePodStorageStats:
 
 
 # max_tid_diff: int = 0  # stat_max_tid_diff
+total_saved: int = 0
+total_saved_bytes: int = 0
 
 
 class FilePodStorageWriter(PodWriter):
@@ -274,6 +276,11 @@ class FilePodStorageWriter(PodWriter):
             # if max_tid_diff < pod_id.tid - same_pod_id.tid:  # stat_max_tid_diff
             #     max_tid_diff = pod_id.tid - same_pod_id.tid  # stat_max_tid_diff
             #     print(max_tid_diff, pod_id, same_pod_id, len(pod_bytes))  # stat_max_tid_diff
+            global total_saved
+            global total_saved_bytes
+            total_saved += 1
+            total_saved_bytes += len(pod_bytes)
+            # print(f"{total_saved_bytes=}")
         else:
             # New pod bytes.
             self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
@@ -319,6 +326,7 @@ class FilePodStorageWriter(PodWriter):
         self.dep_page_buffer = {}
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        print(f"{total_saved=}, {total_saved_bytes=}")
         if len(self.pod_page_buffer) > 0:
             self.flush_pod()
         if len(self.dep_page_buffer) > 0:
@@ -357,7 +365,7 @@ class FilePodStorageReader(PodReader):
                 # for _, pod_bytes in self.page_cache[page_idx].items()))  # stat_cache_pfl
         page = self.page_cache[page_idx]
         if resolved_pid not in page:
-            raise ValueError(f"False index pointing {pod_id} ){resolved_pid}) to {page_path}: {page}")
+            raise ValueError(f"False index pointing {pod_id} ){resolved_pid}) to {page_path}: {page.keys()}")
         # self.cache_stat.add_read(str(resolved_pid), len(page[resolved_pid]))  # stat_cache_pfl
         return io.BytesIO(page[resolved_pid])
 

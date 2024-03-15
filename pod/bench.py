@@ -18,7 +18,19 @@ from loguru import logger
 from pod._pod import AsyncPodObjectStorage, ObjectStorage, PodObjectStorage, SnapshotObjectStorage
 from pod.common import TimeId
 from pod.feature import __FEATURE__
-from pod.model import FeatureCollectorModel, RandomPoddingModel
+from pod.model import (
+    ChangeCollectorModel,
+    FeatureCollectorModel,
+    GreedyPoddingModel,
+    ManualPreservePoddingModel,
+    NaiveChangePredictor,
+    PackPoddingModel,
+    RandomPoddingModel,
+    StorageProfile,
+    TrueChangePredictor,
+    UnifiedCostModel,
+    XGBChangePredictor,
+)
 from pod.pickling import (
     ManualPodding,
     PoddingFunction,
@@ -77,6 +89,23 @@ class BenchArgs:
     """ Learning, model, feature """
     podding_model: str = "manual"  # Model name to use for podding function.
     enable_feature: bool = False  # Whether to enable feature extraction
+
+    # Storage profile.
+    sp_latency: float = 0.01  # Storage latency (seconds).
+    sp_bandwidth: float = 1e9  # Storage bandwidth (B/s).
+
+    # Change model.
+    xgb_path: Optional[Path] = None  # Path to XGBoost pickle model.
+
+    # Cost model.
+    cm_storage_coeff: float = 1.0 / 1e7  # Weight toward storage cost (1/B).
+    cm_write_coeff: float = 1.0  # Weight toward write latency cost (1/s).
+    cm_read_coeff: float = 1.0  # Weight toward read latency cost (1/s).
+    cm_pod_speed: float = 1e8  # Podding bandwidth (B/s), TODO: benchmark this.
+    cm_pickle_speed: float = 1e9  # Pickling bandwidth (B/s), TODO: benchmark this.
+
+    # Packing podding model.
+    pack_max_pod_size: float = 1e7  # Maximum pod size to pacj, approximately (B).
 
 
 """ Notebook handler/executor """
@@ -224,10 +253,43 @@ class SUT:
     def podding_model(args: BenchArgs) -> Tuple[PoddingFunction, Optional[PostPoddingFunction]]:
         if args.podding_model == "manual":
             return ManualPodding.podding_fn, None
+        if args.podding_model == "manual-preserve":
+            model = ManualPreservePoddingModel()
+            return model.podding_fn, None
+        elif args.podding_model == "pack":
+            # change_predictor = NaiveChangePredictor(1.0)
+            assert args.xgb_path is not None, "pack requires --xgb_path"
+            change_predictor = XGBChangePredictor(args.xgb_path)
+            # assert args.xgb_path is not None, "pack requires --xgb_path"
+            # change_predictor = TrueChangePredictor(args.xgb_path)
+            storage_profile = StorageProfile(
+                latency=args.sp_latency,
+                bandwidth=args.sp_bandwidth,
+            )
+            cost_model = UnifiedCostModel(
+                change_predictor=change_predictor,
+                storage_profile=storage_profile,
+                storage_coeff=args.cm_storage_coeff,
+                write_coeff=args.cm_write_coeff,
+                read_coeff=args.cm_read_coeff,
+                pod_speed=args.cm_pod_speed,
+                pickle_speed=args.cm_pickle_speed,
+            )
+            model = PackPoddingModel(
+                cost_model=cost_model,
+                max_pod_size=args.pack_max_pod_size,
+            )
+            return model.podding_fn, model.post_podding_fn
+        elif args.podding_model == "greedy":
+            model = GreedyPoddingModel()
+            return model.podding_fn, model.post_podding_fn
         elif args.podding_model == "random":
             return RandomPoddingModel().podding_fn, None
         elif args.podding_model == "manual-collect":
             model = FeatureCollectorModel(args.result_dir / args.expname / "manual-collect.csv", ManualPodding.podding_fn)
+            return model.podding_fn, model.post_podding_fn
+        elif args.podding_model == "change-collect":
+            model = ChangeCollectorModel(args.result_dir / args.expname / "change-collect.pkl")
             return model.podding_fn, model.post_podding_fn
         raise ValueError(f'Invalid model name "{args.podding_model}"')
 
