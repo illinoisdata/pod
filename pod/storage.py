@@ -357,7 +357,7 @@ class FilePodStorageReader(PodReader):
                 # for _, pod_bytes in self.page_cache[page_idx].items()))  # stat_cache_pfl
         page = self.page_cache[page_idx]
         if resolved_pid not in page:
-            raise ValueError(f"False index pointing {pod_id} ){resolved_pid}) to {page_path}: {page}")
+            raise ValueError(f"False index pointing {pod_id} ({resolved_pid}) to {page_path}: {page.keys()}")
         # self.cache_stat.add_read(str(resolved_pid), len(page[resolved_pid]))  # stat_cache_pfl
         return io.BytesIO(page[resolved_pid])
 

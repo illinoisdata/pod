@@ -1,18 +1,106 @@
 import random
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import pandas as pd
 from loguru import logger
 
-from pod.common import Object, PodId
+from pod.common import Object, ObjectId, PodId
 from pod.feature import __FEATURE__
 from pod.pickling import BasePickler, PodAction, PoddingFunction
 
+try:
+    from types import NoneType
+except ImportError:
+    NoneType = type(None)  # type: ignore
+
 
 class PoddingModel:
-    def podding_fn(self, obj: Object) -> PodAction:
+    def podding_fn(self, obj: Object, pickler: BasePickler) -> PodAction:
         raise NotImplementedError("Abstract method")
+
+
+class ConservativePoddingModel(PoddingModel):
+    def __init__(self) -> None:
+        self._actions: Dict[ObjectId, PodAction] = {}
+
+    def podding_fn(self, obj: Object, pickler: BasePickler) -> PodAction:
+        if id(obj) not in self._actions:
+            self._actions[id(obj)] = self.podding_fn_impl(obj, pickler)
+            # if self._actions[id(obj)] == PodAction.split:
+            #     print(f"new conservative, id= {id(obj)}, action= {self._actions[id(obj)]}")
+        return self._actions[id(obj)]
+
+    def podding_fn_impl(self, obj: Object, pickler: BasePickler) -> PodAction:
+        raise NotImplementedError("Abstract method")
+
+
+class GreedyPoddingModel(ConservativePoddingModel):
+    IMMUTABLE_TYPES = (
+        # Primitive immutable types.
+        str,
+        bytes,
+        int,
+        float,
+        complex,
+        bool,
+        # Immutable collections.
+        tuple,
+        frozenset,
+        # Meta and singleton types.
+        NoneType,
+        type,
+    )
+
+    def __init__(
+        self,
+        pod_overhead: float,  # bytes per save.
+    ) -> None:
+        ConservativePoddingModel.__init__(self)
+
+        self._pod_cr: Dict[PodId, float] = {}
+        self._pod_overhead = pod_overhead
+
+    def podding_fn_impl(self, obj: Object, pickler: BasePickler) -> PodAction:
+        if pickler.root_pid not in self._pod_cr:
+            self._pod_cr[pickler.root_pid] = self._change_rate(pickler.root_obj)
+        pod_cr = self._pod_cr[pickler.root_pid]
+        obj_cr = self._change_rate(obj)
+        pod_size = self._get_pod_size(pickler)
+        obj_size = sys.getsizeof(obj)
+        bundle_cost = (pod_size + obj_size) * (pod_cr + obj_cr) + self._pod_overhead
+        split_cost = pod_size * pod_cr + obj_size * obj_cr + 2 * self._pod_overhead
+        split_final_cost = float("inf")  # Not considered for now.
+        min_cost = min(bundle_cost, split_cost, split_final_cost)
+        # print(f"{bundle_cost=}, {split_cost=}, {split_final_cost=}")
+        if bundle_cost == min_cost:
+            self._pod_cr[pickler.root_pid] = pod_cr + obj_cr
+            return PodAction.bundle
+        elif split_cost == min_cost:
+            return PodAction.split
+        elif split_final_cost == min_cost:
+            return PodAction.split_final
+        raise ValueError(f"Unreachable min({bundle_cost}, {split_cost}, {split_final_cost}) = {min_cost}")
+
+    def post_podding_fn(self) -> None:
+        _post_podding_fn = getattr(super(), "post_podding_fn", None)
+        if _post_podding_fn is not None:
+            _post_podding_fn()
+        self._pod_cr = {}
+
+    def _change_rate(self, obj: Object) -> float:
+        # TODO: Properly model rate of change.
+        if isinstance(obj, GreedyPoddingModel.IMMUTABLE_TYPES):
+            return 0.0
+        return 0.5
+
+    def _get_pod_size(self, pickler: BasePickler) -> int:
+        file = getattr(pickler, "file", None)
+        if file is None:
+            logger.warning("Unexpectedly missing pickler's field: file.")
+            return 0
+        return len(file.getvalue())
 
 
 class RandomPoddingModel:

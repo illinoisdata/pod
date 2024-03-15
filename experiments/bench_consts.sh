@@ -47,6 +47,8 @@ SUTS=(
     "imm"
     "pfl"
     "pfa"
+    "pgl"
+    "pga"
     "ppg"
     "prd"
     "pnj"
@@ -69,6 +71,12 @@ function get_sut_args() {
     elif [[ $_SUT == "pfa" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --sut_async"
+    elif [[ $_SUT == "pgl" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy"
+    elif [[ $_SUT == "pga" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy --sut_async"
     elif [[ $_SUT == "ppg" ]]
     then
         sut_args="--sut pod_psql --psql_hostname podpsql --psql_port 5432"
@@ -104,6 +112,12 @@ function prepare_sut() {
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pfa" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pgl" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pga" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "ppg" ]]

@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Dict, Optional, Set, Tuple
 
 from pod.common import Object, PodId, TimeId, make_pod_id, object_id, step_time_id
-from pod.feature import __FEATURE__
 from pod.pickling import ManualPodding, PodPickling, SnapshotPodPickling, StaticPodPickling
 from pod.stats import ExpStat
 from pod.storage import FilePodStorage
@@ -129,7 +128,6 @@ class PodObjectStorage(ObjectStorage):
         return PodNamespace(namespace)
 
     def save(self, namespace: Namespace) -> TimeId:
-        __FEATURE__.new_dump()
         tid = step_time_id()
         namemap_pid, namemap = self._save_as_namemap(tid, namespace)
         self._save_objects(tid, namespace, namemap_pid, namemap)
@@ -341,7 +339,6 @@ class AsyncPodObjectStorage(PodObjectStorage):
         self.join()
 
         # Plan for next namemap.
-        __FEATURE__.new_dump()
         tid = step_time_id()
         namemap_pid, namemap = self._save_as_namemap(tid, namespace)
 
