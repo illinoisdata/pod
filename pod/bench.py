@@ -15,7 +15,7 @@ import numpy as np
 import simple_parsing
 from loguru import logger
 
-from pod._pod import AsyncPodObjectStorage, ObjectStorage, PodObjectStorage, SnapshotObjectStorage
+from pod._pod import AsyncPodObjectStorage, Namespace, ObjectStorage, PodObjectStorage, SnapshotObjectStorage
 from pod.common import TimeId
 from pod.feature import __FEATURE__
 from pod.model import FeatureCollectorModel, GreedyPoddingModel, RandomPoddingModel, RoCFeatureCollectorModel
@@ -363,12 +363,13 @@ def run_exp1_impl(args: BenchArgs) -> None:
     logger.info(f"Saved ExpStat (dump only) to {result_path}")
 
     # Load random steps.
+    loaded_locals: Optional[Namespace] = None
     for nth, idx in enumerate(random.choices(range(len(tids)), k=args.exp1_num_loads)):
         # Load state.
         load_start_ts = time.time()
         try:
             with BlockTimeout(60):
-                the_locals = sut.load(tids[idx])
+                loaded_locals = sut.load(tids[idx])
         except TimeoutError as e:
             logger.warning(f"{e}")
         load_stop_ts = time.time()
@@ -380,7 +381,9 @@ def run_exp1_impl(args: BenchArgs) -> None:
         )
 
         # Reset environment to reduce noise.
-        del the_locals
+        if loaded_locals is not None:
+            del loaded_locals
+            loaded_locals = None
         gc.collect()
     expstat.summary()
 
