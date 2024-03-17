@@ -18,7 +18,7 @@ from loguru import logger
 from pod._pod import AsyncPodObjectStorage, ObjectStorage, PodObjectStorage, SnapshotObjectStorage
 from pod.common import TimeId
 from pod.feature import __FEATURE__
-from pod.model import FeatureCollectorModel, GreedyPoddingModel, RandomPoddingModel
+from pod.model import FeatureCollectorModel, GreedyPoddingModel, RandomPoddingModel, RoCFeatureCollectorModel
 from pod.pickling import (
     ManualPodding,
     PoddingFunction,
@@ -235,6 +235,12 @@ class SUT:
         elif args.podding_model == "manual-collect":
             fc_model = FeatureCollectorModel(args.result_dir / args.expname / "manual-collect.csv", ManualPodding.podding_fn)
             return fc_model.podding_fn, fc_model.post_podding_fn
+        elif args.podding_model == "roc-collect":
+            roc_model = RoCFeatureCollectorModel(
+                args.result_dir / args.expname / "roc-collect" / "feature.csv",
+                args.result_dir / args.expname / "roc-collect" / "change.csv",
+            )
+            return roc_model.podding_fn, roc_model.post_podding_fn
         raise ValueError(f'Invalid model name "{args.podding_model}"')
 
     @staticmethod
@@ -298,7 +304,10 @@ def run_exp1_impl(args: BenchArgs) -> None:
 
     # Load notebook.
     nb_cells = Notebooks.nb(args)
-    nb_exec = NotebookExecutor(nb_cells, the_locals=sut.new_managed_namespace())
+    namespace = sut.new_managed_namespace()
+    nb_exec = NotebookExecutor(nb_cells, the_locals=namespace)
+    if args.podding_model == "roc-collect":
+        RoCFeatureCollectorModel.NAMESPACE = namespace
 
     # Measurement tracker.
     expstat = ExpStat()

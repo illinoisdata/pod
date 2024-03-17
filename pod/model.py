@@ -1,5 +1,7 @@
+import inspect
 import random
 import sys
+from copyreg import dispatch_table
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -175,3 +177,93 @@ class FeatureCollectorModel:
         if len_fn is None:
             return None
         return len_fn()
+
+
+class RoCFeatureCollectorModel:
+    NAMESPACE: Dict[str, Object] = {}
+
+    def __init__(self, feature_path: Path, change_path: Path) -> None:
+        self._feature_path = feature_path
+        self._change_path = change_path
+        self.oid_counters: Dict[int, int] = {}
+        self.features: Dict[str, list] = {
+            "oid": [],
+            "global": [],
+            "type": [],
+            "type_global": [],
+            "type_pickler_dispatch": [],
+            "type_subclass_type": [],
+            "type_module": [],
+            "type_module_global": [],
+            "has_reduce_ex": [],
+            "has_reduce": [],
+            "size": [],
+            "len": [],
+            "len_dict": [],
+            "len_slots": [],
+        }
+        self.changes: Dict[str, list] = {
+            "oid": [],
+            "nth": [],
+            "has_changed": [],
+        }
+
+        assert __FEATURE__.in_block and "track_change" in __FEATURE__.cfg
+
+    def podding_fn(self, obj: Object, pickler: BasePickler) -> PodAction:
+        if id(obj) not in self.oid_counters:
+            self.oid_counters[id(obj)] = 0
+
+            type_module = inspect.getmodule(type(obj))
+            namespace_objs = RoCFeatureCollectorModel.NAMESPACE.values()  # TODO: Skip activating.
+
+            def is_global(obj):
+                return any(namespace_obj is obj for namespace_obj in namespace_objs)
+
+            self.features["oid"].append(id(obj))
+            self.features["global"].append(is_global(obj))
+            self.features["type"].append(type(obj).__name__)
+            self.features["type_global"].append(is_global(type(obj)))
+            self.features["type_pickler_dispatch"].append(type(obj) in self._get_dispatch_table(pickler))
+            self.features["type_subclass_type"].append(issubclass(type(obj), type))
+            self.features["type_module"].append(None if type_module is None else type_module.__name__)
+            self.features["type_module_global"].append(is_global(type_module))
+            self.features["has_reduce"].append(hasattr(obj, "__reduce__") and callable(obj.__reduce__))
+            self.features["has_reduce_ex"].append(hasattr(obj, "__reduce_ex__") and callable(obj.__reduce_ex__))
+            self.features["size"].append(sys.getsizeof(obj))
+            self.features["len"].append(self._get_obj_len(obj))
+            self.features["len_dict"].append(self._get_obj_len_dict(obj))
+            self.features["len_slots"].append(self._get_obj_len_slots(obj))
+        return PodAction.split
+
+    def post_podding_fn(self) -> None:
+        for oid in self.oid_counters:
+            self.changes["oid"].append(oid)
+            self.changes["nth"].append(self.oid_counters[oid])
+            self.changes["has_changed"].append(__FEATURE__.has_changed(oid))
+            self.oid_counters[oid] += 1
+        self.save()
+
+    def save(self) -> None:
+        self._feature_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(self.features).to_csv(self._feature_path)
+        self._change_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(self.changes).to_csv(self._change_path)
+
+    def _get_dispatch_table(self, pickler: BasePickler) -> dict:
+        return getattr(pickler, "dispatch_table", dispatch_table)
+
+    def _get_obj_len(self, obj: Object) -> Optional[int]:
+        if hasattr(obj, "__len__"):
+            return obj.__len__()
+        return None
+
+    def _get_obj_len_dict(self, obj: Object) -> Optional[int]:
+        if hasattr(obj, "__dict__"):
+            return len(obj.__dict__)
+        return None
+
+    def _get_obj_len_slots(self, obj: Object) -> Optional[int]:
+        if hasattr(obj, "__slots__"):
+            return len(obj.__slots__)
+        return None
