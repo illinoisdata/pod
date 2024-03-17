@@ -254,9 +254,10 @@ class RoCFeatureCollectorModel:
         return getattr(pickler, "dispatch_table", dispatch_table)
 
     def _get_obj_len(self, obj: Object) -> Optional[int]:
-        if hasattr(obj, "__len__"):
+        try:
             return obj.__len__()
-        return None
+        except Exception:
+            return None
 
     def _get_obj_len_dict(self, obj: Object) -> Optional[int]:
         if hasattr(obj, "__dict__"):

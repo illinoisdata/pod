@@ -54,6 +54,7 @@ SUTS=(
     "pnj"
     "pmg"
     "pflc"
+    "prcc"
 )
 
 function get_sut_args() {
@@ -92,6 +93,9 @@ function get_sut_args() {
     elif [[ $_SUT == "pflc" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --enable_feature --podding_model manual-collect"
+    elif [[ $_SUT == "prcc" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --enable_feature --podding_model roc-collect"
     else
         echo "ERROR (get_sut_args): Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
@@ -143,6 +147,9 @@ function prepare_sut() {
         echo "mongo \"db.dropDatabase();\""
         mongosh pod --host podmongo --port 27017 --eval "db.dropDatabase();"
     elif [[ $_SUT == "pflc" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "prcc" ]]
     then
         rm -r ${POD_DIR}
     else
