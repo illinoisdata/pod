@@ -30,8 +30,8 @@ class ChangeTracker:
         self._oid_change_count: Dict[ObjectId, int] = {}
 
     def new_dump(self):
-        self._prev_pod_set = self._pod_set
-        self._pod_set = set()
+        self._prev_pod_set |= self._pod_set
+        # self._pod_set = set()
         self._pod_oids = {}
         self._oid_recent_change = set()
         self._pod_max_change_prob = {}
