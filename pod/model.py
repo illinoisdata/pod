@@ -1,4 +1,8 @@
+from __future__ import annotations  # isort:skip
+import pod.__pickle__  # noqa, isort:skip
+
 import inspect
+import pickle
 import random
 import sys
 from copyreg import dispatch_table
@@ -7,6 +11,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 from loguru import logger
+from xgboost import XGBRegressor
 
 from pod.common import Object, ObjectId, PodId
 from pod.feature import __FEATURE__
@@ -16,6 +21,50 @@ try:
     from types import NoneType
 except ImportError:
     NoneType = type(None)  # type: ignore
+
+
+""" Rate of Change Models """
+
+
+class RateOfChangeModel:
+    def roc(self, obj: Object, pickler: BasePickler) -> float:
+        raise NotImplementedError("Abstract method")
+
+
+class XGBRegressorRoC(RateOfChangeModel):
+    def __init__(self, bst: XGBRegressor) -> None:
+        self._bst = bst
+
+    @staticmethod
+    def load_from(path: Path) -> XGBRegressorRoC:
+        with open(path, "rb") as f:
+            bst = pickle.load(f)
+        return XGBRegressorRoC(bst)
+
+    def roc(self, obj: Object, pickler: BasePickler) -> float:
+        # Extract features. Should match those in RoCFeatureCollectorModel and training script.
+        features = [
+            sys.getsizeof(obj),  # size
+            self._get_obj_len(obj),  # len
+            self._get_obj_len_dict(obj),  # len_dict
+        ]
+
+        # Run through XGBRegressor.
+        return self._bst.predict([features])[0]
+
+    def _get_obj_len(self, obj: Object) -> Optional[int]:
+        try:
+            return obj.__len__()
+        except Exception:
+            return None
+
+    def _get_obj_len_dict(self, obj: Object) -> Optional[int]:
+        if hasattr(obj, "__dict__"):
+            return len(obj.__dict__)
+        return None
+
+
+""" PoddingModel """
 
 
 class PoddingModel:
@@ -57,18 +106,20 @@ class GreedyPoddingModel(ConservativePoddingModel):
 
     def __init__(
         self,
+        roc_model: RateOfChangeModel,
         pod_overhead: float,  # bytes per save.
     ) -> None:
         ConservativePoddingModel.__init__(self)
+        self._roc_model = roc_model
+        self._pod_overhead = pod_overhead
 
         self._pod_cr: Dict[PodId, float] = {}
-        self._pod_overhead = pod_overhead
 
     def podding_fn_impl(self, obj: Object, pickler: BasePickler) -> PodAction:
         if pickler.root_pid not in self._pod_cr:
-            self._pod_cr[pickler.root_pid] = self._change_rate(pickler.root_obj)
+            self._pod_cr[pickler.root_pid] = self._change_rate(pickler.root_obj, pickler)
         pod_cr = self._pod_cr[pickler.root_pid]
-        obj_cr = self._change_rate(obj)
+        obj_cr = self._change_rate(obj, pickler)
         pod_size = self._get_pod_size(pickler)
         obj_size = sys.getsizeof(obj)
         bundle_cost = (pod_size + obj_size) * (pod_cr + obj_cr) + self._pod_overhead
@@ -91,11 +142,11 @@ class GreedyPoddingModel(ConservativePoddingModel):
             _post_podding_fn()
         self._pod_cr = {}
 
-    def _change_rate(self, obj: Object) -> float:
+    def _change_rate(self, obj: Object, pickler: BasePickler) -> float:
         # TODO: Properly model rate of change.
         if isinstance(obj, GreedyPoddingModel.IMMUTABLE_TYPES):
             return 0.0
-        return 0.5
+        return self._roc_model.roc(obj, pickler)
 
     def _get_pod_size(self, pickler: BasePickler) -> int:
         file = getattr(pickler, "file", None)

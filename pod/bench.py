@@ -18,7 +18,7 @@ from loguru import logger
 from pod._pod import AsyncPodObjectStorage, Namespace, ObjectStorage, PodObjectStorage, SnapshotObjectStorage
 from pod.common import TimeId
 from pod.feature import __FEATURE__
-from pod.model import FeatureCollectorModel, GreedyPoddingModel, RandomPoddingModel, RoCFeatureCollectorModel
+from pod.model import FeatureCollectorModel, GreedyPoddingModel, RandomPoddingModel, RoCFeatureCollectorModel, XGBRegressorRoC
 from pod.pickling import (
     ManualPodding,
     PoddingFunction,
@@ -80,6 +80,7 @@ class BenchArgs:
 
     # Cost model.
     cm_pod_overhead: float = 120  # Overhead for each pod (bytes per save).
+    roc_path: Optional[Path] = None  # Path to rate of change model.
 
 
 """ Notebook handler/executor """
@@ -228,7 +229,9 @@ class SUT:
         if args.podding_model == "manual":
             return ManualPodding.podding_fn, None
         elif args.podding_model == "greedy":
-            g_model = GreedyPoddingModel(pod_overhead=args.cm_pod_overhead)
+            assert args.roc_path is not None, "greedy requires --roc_path"
+            roc_model = XGBRegressorRoC.load_from(args.roc_path)
+            g_model = GreedyPoddingModel(roc_model=roc_model, pod_overhead=args.cm_pod_overhead)
             return g_model.podding_fn, g_model.post_podding_fn
         elif args.podding_model == "random":
             return RandomPoddingModel().podding_fn, None
@@ -236,11 +239,11 @@ class SUT:
             fc_model = FeatureCollectorModel(args.result_dir / args.expname / "manual-collect.csv", ManualPodding.podding_fn)
             return fc_model.podding_fn, fc_model.post_podding_fn
         elif args.podding_model == "roc-collect":
-            roc_model = RoCFeatureCollectorModel(
+            rocc_model = RoCFeatureCollectorModel(
                 args.result_dir / args.expname / "roc-collect" / "feature.csv",
                 args.result_dir / args.expname / "roc-collect" / "change.csv",
             )
-            return roc_model.podding_fn, roc_model.post_podding_fn
+            return rocc_model.podding_fn, rocc_model.post_podding_fn
         raise ValueError(f'Invalid model name "{args.podding_model}"')
 
     @staticmethod
