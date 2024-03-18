@@ -74,10 +74,10 @@ function get_sut_args() {
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --sut_async"
     elif [[ $_SUT == "pgl" ]]
     then
-        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy"
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy --roc_path models/roc_model.pkl"
     elif [[ $_SUT == "pga" ]]
     then
-        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy --sut_async"
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy --roc_path models/roc_model.pkl --sut_async"
     elif [[ $_SUT == "ppg" ]]
     then
         sut_args="--sut pod_psql --psql_hostname podpsql --psql_port 5432"

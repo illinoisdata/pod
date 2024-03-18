@@ -50,7 +50,7 @@ class XGBRegressorRoC(RateOfChangeModel):
         ]
 
         # Run through XGBRegressor.
-        return self._bst.predict([features])[0]
+        return max(self._bst.predict([features])[0], 0.0)
 
     def _get_obj_len(self, obj: Object) -> Optional[int]:
         try:
