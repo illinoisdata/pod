@@ -146,7 +146,10 @@ def plot_exp1batch(argv: List[str]) -> None:
         logger.info(f"{single.name}")
 
         # Read all results.
-        all_results = [(result_path.parent.name, ExpStat.load(result_path)) for result_path in single.result_paths]
+        all_results = [
+            (f"{idx}_{result_path.parent.name}", ExpStat.load(result_path))
+            for idx, result_path in enumerate(single.result_paths)
+        ]
 
         # Print summary..
         for expname, result in all_results:
