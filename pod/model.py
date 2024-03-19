@@ -120,15 +120,16 @@ class GreedyPoddingModel(ConservativePoddingModel):
             self._pod_cr[pickler.root_pid] = self._change_rate(pickler.root_obj, pickler)
         pod_cr = self._pod_cr[pickler.root_pid]
         obj_cr = self._change_rate(obj, pickler)
+        bundle_cr = min(pod_cr + obj_cr, 1.0)
         pod_size = self._get_pod_size(pickler)
         obj_size = sys.getsizeof(obj)
-        bundle_cost = (pod_size + obj_size) * (pod_cr + obj_cr) + self._pod_overhead
+        bundle_cost = (pod_size + obj_size) * bundle_cr + self._pod_overhead
         split_cost = pod_size * pod_cr + obj_size * obj_cr + 2 * self._pod_overhead
         split_final_cost = float("inf")  # Not considered for now.
         min_cost = min(bundle_cost, split_cost, split_final_cost)
         # print(f"{bundle_cost=}, {split_cost=}, {split_final_cost=}")
         if bundle_cost == min_cost:
-            self._pod_cr[pickler.root_pid] = pod_cr + obj_cr
+            self._pod_cr[pickler.root_pid] = bundle_cr
             return PodAction.bundle
         elif split_cost == min_cost:
             return PodAction.split
@@ -146,7 +147,7 @@ class GreedyPoddingModel(ConservativePoddingModel):
         # TODO: Properly model rate of change.
         if isinstance(obj, GreedyPoddingModel.IMMUTABLE_TYPES):
             return 0.0
-        return self._roc_model.roc(obj, pickler)
+        return min(max(self._roc_model.roc(obj, pickler), 0.0), 1.0)
 
     def _get_pod_size(self, pickler: BasePickler) -> int:
         file = getattr(pickler, "file", None)
