@@ -1,6 +1,9 @@
-from __future__ import annotations
+from __future__ import annotations  # isort:skip
+import pod.__pickle__  # noqa, isort:skip
 
+import contextlib
 import gc
+import io
 import random
 import signal
 import sys
@@ -194,14 +197,20 @@ class NotebookExecutor:
     def num_cells(self) -> int:
         return len(self.cells)
 
-    def iter(self) -> Generator[Tuple[NotebookCell, dict, dict], None, None]:
+    def iter(self) -> Generator[Tuple[NotebookCell, dict, dict, str, str], None, None]:
         for cell in self.cells.iter():
+            stdout, stderr = "", ""
             try:
-                exec(cell, self.the_globals, self.the_locals)
+                with contextlib.redirect_stdout(io.StringIO()) as stdout_f, contextlib.redirect_stderr(
+                    io.StringIO()
+                ) as stderr_f:
+                    exec(cell, self.the_globals, self.the_locals)
+                    stdout = stdout_f.getvalue()
+                    stderr = stderr_f.getvalue()
             except Exception:
                 logger.error("Exception while executing...\n" f"{cell}\n" f"...with {traceback.format_exc()}")
                 sys.exit(2)
-            yield cell, self.the_globals, self.the_locals
+            yield cell, self.the_globals, self.the_locals, stdout, stderr
 
 
 class BlockTimeout:
@@ -326,7 +335,7 @@ def run_exp1_impl(args: BenchArgs) -> None:
     for nth in range(nb_exec.num_cells()):
         # Execute next cell.
         exec_start_ts = time.time()
-        cell, the_globals, the_locals = next(nb_exec_step)
+        cell, the_globals, the_locals, stdout, stderr = next(nb_exec_step)
         exec_stop_ts = time.time()
 
         # Dump current state.
@@ -402,6 +411,7 @@ def run_exp1(argv: List[str]) -> None:
     # Parse arguments.
     args = simple_parsing.parse(BenchArgs, args=argv)
     logger.info(args)
+    logger.info(f"Using base pickle= {pod.__pickle__.BASE_PICKLE}")
 
     # Setup learning if needed.
     if args.enable_feature:

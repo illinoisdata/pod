@@ -1,17 +1,44 @@
 from __future__ import annotations  # isort:skip
 
 import os
-import pickle
+import pickle as _pickle
 from dataclasses import dataclass
 from typing import Any, Dict, List, Set
 
 # Use Python pickle for testing pod prototype. When ideas are solidified and pod is implemented in C, revert this back.
-pickle.Pickler = pickle._Pickler  # type: ignore
-pickle.Unpickler = pickle._Unpickler  # type: ignore
-pickle.dump = pickle._dump  # type: ignore
-pickle.dumps = pickle._dumps  # type: ignore
-pickle.load = pickle._load  # type: ignore
-pickle.loads = pickle._loads  # type: ignore
+_pickle.Pickler = _pickle._Pickler  # type: ignore
+_pickle.Unpickler = _pickle._Unpickler  # type: ignore
+_pickle.dump = _pickle._dump  # type: ignore
+_pickle.dumps = _pickle._dumps  # type: ignore
+_pickle.load = _pickle._load  # type: ignore
+_pickle.loads = _pickle._loads  # type: ignore
+
+
+if _pickle._HAVE_PICKLE_BUFFER:  # type: ignore
+
+    def _save_picklebuffer(self, obj):
+        if self.proto < 5:
+            raise _pickle.PicklingError("PickleBuffer can only pickled with " "protocol >= 5")
+        with obj.raw() as m:
+            if not m.contiguous:
+                raise _pickle.PicklingError("PickleBuffer can not be pickled when " "pointing to a non-contiguous buffer")
+            in_band = True
+            if self._buffer_callback is not None:
+                in_band = bool(self._buffer_callback(obj))
+            if in_band:
+                # Write data in-band
+                # XXX The C implementation avoids a copy here
+                if m.readonly:
+                    self.save(m.tobytes())  # PATCH: Fail memoize if empty bytes.
+                else:
+                    self.save(m.tobytes())  # PATCH: Fail memoize if empty bytes.
+            else:
+                # Write data out-of-band
+                self.write(_pickle.NEXT_BUFFER)
+                if m.readonly:
+                    self.write(_pickle.READONLY_BUFFER)
+
+    _pickle.Pickler.dispatch[_pickle.PickleBuffer] = _save_picklebuffer
 
 
 # Specify base pickle module at import time. Supported base pickles: dill, cloudpickle, pickle.
@@ -136,11 +163,114 @@ if BASE_PICKLE == "dill":
 
 elif BASE_PICKLE == "cloudpickle":
     # Must be imported after the pickle switch.
-    import cloudpickle  # noqa: E402
+    import cloudpickle.cloudpickle as _cloudpickle  # noqa: E402
 
     # Revert the dispatch table patching because it collides with pure-Python pickle.
     # When pod is fully integrated with C pickle and the pickle switch is reverted, this should be safe to remove.
-    cloudpickle.Pickler.dispatch = pickle.Pickler.dispatch.copy()
+    _cloudpickle.Pickler.dispatch = _pickle.Pickler.dispatch.copy()
+
+    # def _save_reduce_pickle5(
+    #     self,
+    #     func,
+    #     args,
+    #     state=None,
+    #     listitems=None,
+    #     dictitems=None,
+    #     state_setter=None,
+    #     obj=None,
+    # ):
+    #     save = self.save
+    #     write = self.write
+    #     self.save_reduce(
+    #         func,
+    #         args,
+    #         state=None,
+    #         listitems=listitems,
+    #         dictitems=dictitems,
+    #         obj=obj,
+    #     )
+    #     # backport of the Python 3.8 state_setter pickle operations
+    #     save(state_setter)
+    #     save(obj)  # simple BINGET opcode as obj is already memoized.
+    #     save(state)
+    #     write(_pickle.TUPLE2)
+    #     # Trigger a state_setter(obj, state) function call.
+    #     write(_pickle.REDUCE)
+    #     # The purpose of state_setter is to carry-out an
+    #     # inplace modification of obj. We do not care about what the
+    #     # method might return, so its output is eventually removed from
+    #     # the stack.
+    #     write(_pickle.POP)
+
+    # def save_global(self, obj, name=None, pack=_cloudpickle.struct.pack):
+    #     """Main dispatch method.
+
+    #     The name of this method is somewhat misleading: all types get
+    #     dispatched here.
+    #     """
+    #     if obj is type(None):  # noqa
+    #         return self.save_reduce(type, (None,), obj=obj)
+    #     elif obj is type(Ellipsis):
+    #         return self.save_reduce(type, (Ellipsis,), obj=obj)
+    #     elif obj is type(NotImplemented):
+    #         return self.save_reduce(type, (NotImplemented,), obj=obj)
+    #     elif obj in _cloudpickle._BUILTIN_TYPE_NAMES:
+    #         return self.save_reduce(
+    #             _builtin_type, (_cloudpickle._BUILTIN_TYPE_NAMES[obj],), obj=obj
+    #         )
+
+    #     if name is not None:
+    #         _pickle.Pickler.save_global(self, obj, name=name)
+    #     elif not _cloudpickle._should_pickle_by_reference(obj, name=name):
+    #         _save_reduce_pickle5(self, *_dynamic_class_reduce(obj), obj=obj)
+    #     else:
+    #         _pickle.Pickler.save_global(self, obj, name=name)
+
+    # _cloudpickle.Pickler.dispatch[type] = save_global
+
+    # def save_function(self, obj, name=None):
+    #     """Registered with the dispatch to handle all function types.
+
+    #     Determines what kind of function obj is (e.g. lambda, defined at
+    #     interactive prompt, etc) and handles the pickling appropriately.
+    #     """
+    #     if _cloudpickle._should_pickle_by_reference(obj, name=name):
+    #         return _pickle.Pickler.save_global(self, obj, name=name)
+    #     elif PYPY and isinstance(obj.__code__, builtin_code_type):
+    #         return self.save_pypy_builtin_func(obj)
+    #     else:
+    #         return _save_reduce_pickle5(
+    #             self,
+    #             *self._dynamic_function_reduce(obj),
+    #             obj=obj,
+    #         )
+
+    # def save_pypy_builtin_func(self, obj):
+    #     """Save pypy equivalent of builtin functions.
+
+    #     PyPy does not have the concept of builtin-functions. Instead,
+    #     builtin-functions are simple function instances, but with a
+    #     builtin-code attribute.
+    #     Most of the time, builtin functions should be pickled by attribute.
+    #     But PyPy has flaky support for __qualname__, so some builtin
+    #     functions such as float.__new__ will be classified as dynamic. For
+    #     this reason only, we created this special routine. Because
+    #     builtin-functions are not expected to have closure or globals,
+    #     there is no additional hack (compared the one already implemented
+    #     in pickle) to protect ourselves from reference cycles. A simple
+    #     (reconstructor, newargs, obj.__dict__) tuple is save_reduced.  Note
+    #     also that PyPy improved their support for __qualname__ in v3.6, so
+    #     this routing should be removed when _cloudpickle supports only PyPy
+    #     3.6 and later.
+    #     """
+    #     rv = (
+    #         _cloudpickle.types.FunctionType,
+    #         (obj.__code__, {}, obj.__name__, obj.__defaults__, obj.__closure__),
+    #         obj.__dict__,
+    #     )
+    #     self.save_reduce(*rv, obj=obj)
+
+    # _cloudpickle.Pickler.dispatch[_cloudpickle.types.FunctionType] = save_function
 
 elif BASE_PICKLE == "pickle":
     pass

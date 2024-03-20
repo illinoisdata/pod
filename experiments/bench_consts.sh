@@ -1,5 +1,7 @@
 #/!bin/bash
 
+POD_DIR=/tmp/pod
+
 ############
 ## NB_MAP ##
 ############
