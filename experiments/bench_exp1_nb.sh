@@ -8,8 +8,6 @@ int_handler() {
 trap 'int_handler' INT
 source experiments/bench_consts.sh
 
-POD_DIR=/tmp/pod
-
 if [ "$#" -ne 2 ]
 then
     echo "Require 2 argument (SUT, NBNAME), $# provided"
