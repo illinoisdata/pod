@@ -20,6 +20,7 @@ from pod.common import PodId
 from pod.feature import __FEATURE__
 from pod.pickling import ManualPodding, StaticPodPickling
 from pod.storage import FilePodStorage
+from pod.xgb_predictor import XGBPredictor
 
 with open("benchdata.json", "r") as bench_file:
     BENCH_DATA = json.load(bench_file)
@@ -191,7 +192,9 @@ def train(n_epochs, nbs, args: TrainArgs):
         pass
     with __FEATURE__:
         save_file_str = (str(args.gamma) + "&" + str(args.alpha)).replace(".", "-")
-        model = QLearningPoddingModel(train=True, gamma=args.gamma, alpha=args.alpha)
+        prob_predictor = XGBPredictor(data_dir="podding_features/")
+        prob_predictor.train()
+        model = QLearningPoddingModel(train=True, gamma=args.gamma, alpha=args.alpha, predictor=prob_predictor)
         for n in tqdm(range(n_epochs)):
             model.set_epsilon(eps)
             logger.info(f"EPOCH = {n}, GAMMA = {args.gamma}, ALPHA = {args.alpha}, EPSILON = {eps}")
@@ -232,6 +235,8 @@ def train(n_epochs, nbs, args: TrainArgs):
             avg_reward = sum(rewards) / len(rewards)
             model.reward_history.append(avg_reward)
             logger.info(f"EPOCH {n}, AVG SUM OF REWARDS {avg_reward}")
+            model.save_features("podding_features/data.csv")
+
             if n % 10 == 0:
                 model.save_q_table(f"qtables/{save_file_str}-{n}.npy")
             model.clear_action_history()

@@ -13,6 +13,7 @@ from loguru import logger
 from pod.common import Object, PodId
 from pod.feature import __FEATURE__
 from pod.pickling import BasePickler, PodAction, PoddingFunction
+from pod.xgb_predictor import XGBPredictor
 
 
 class PoddingModel:
@@ -76,11 +77,12 @@ class QLearningPoddingModel(PoddingModel):
     PROBABILITIES = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]
     ACTION_CHOICES = list(range(len(list(PodAction)))) + [-1]
     actions = list(PodAction)
-    def __init__(self, qt_path=None, train=False, alpha=0.2, gamma=0.8):
+    def __init__(self, predictor: XGBPredictor, qt_path=None, train=False, alpha=0.2, gamma=0.8):
         self.state_to_qt_idx = {}
         self.action_history = {}
         idx = 0
         self.actions = list(PodAction)
+        self.change_predictor = predictor
         num_rows_qt = (
             2
             * len(QLearningPoddingModel.SIZES)
@@ -206,6 +208,7 @@ class QLearningPoddingModel(PoddingModel):
     def post_podding_fn(self) -> None:
         for oid in self.features["oid"][len(self.features["has_changed"]) :]:
             self.features["has_changed"].append(__FEATURE__.has_changed(oid))
+        self.save_features("features.csv")
 
     def set_epsilon(self, eps):
         self.epsilon = eps
@@ -265,6 +268,10 @@ class QLearningPoddingModel(PoddingModel):
     
     def clear_action_history(self):
         self.action_history = {}
+
+    def save_features(self, save_path: Path) -> None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(self.features).to_csv(save_path)
 
     def batch_update_q(self, reward):
         # logger.info(f"UPDATING ON {len(self.history)} ITEMS")
