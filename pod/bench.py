@@ -55,7 +55,7 @@ class BenchArgs:
     seed: int = 123  # Seed for randomization.
 
     """ Exp1: dumps and loads """
-    exp1_num_loads: int = 100  # Number of loads to test.
+    exp1_num_loads_per_save: int = 4  # Number of loads to test.
 
     """ Random mutating list """
     rmlist_num_cells: int = 10  # Number of cells.
@@ -374,14 +374,19 @@ def run_exp1_impl(args: BenchArgs) -> None:
     result_path = expstat.save(args.result_dir / args.expname / "expstat.json")
     logger.info(f"Saved ExpStat (dump only) to {result_path}")
 
+    # Test equal number of loads per time ID.
+    test_tids = tids * args.exp1_num_loads_per_save
+    random.shuffle(test_tids)
+    logger.info(f"Testing {len(test_tids)} loads, {test_tids}")
+
     # Load random steps.
     loaded_locals: Optional[Namespace] = None
-    for nth, idx in enumerate(random.choices(range(len(tids)), k=args.exp1_num_loads)):
+    for nth, tid in enumerate(test_tids):
         # Load state.
         load_start_ts = time.time()
         try:
             with BlockTimeout(60):
-                loaded_locals = sut.load(tids[idx])
+                loaded_locals = sut.load(tid)
         except TimeoutError as e:
             logger.warning(f"{e}")
         load_stop_ts = time.time()
@@ -389,6 +394,7 @@ def run_exp1_impl(args: BenchArgs) -> None:
         # Record measurements.
         expstat.add_load(
             nth=nth,
+            tid=tid,
             time_s=load_stop_ts - load_start_ts,
         )
 

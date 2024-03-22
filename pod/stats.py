@@ -8,7 +8,7 @@ from typing import Dict, List, Set, Union
 from dataclasses_json import dataclass_json
 from loguru import logger
 
-from pod.common import Object, PodId
+from pod.common import Object, PodId, TimeId
 
 
 def strf_deltatime(time_s: float) -> str:
@@ -63,6 +63,7 @@ class DumpStat:
 @dataclass
 class LoadStat:
     nth: int
+    tid: TimeId
     time_s: float
 
 
@@ -97,10 +98,11 @@ class ExpStat:
             f", avgt= {strf_deltatime(dump_avg_t_s)} ({strf_throughput(1.0/dump_avg_t_s)})"
         )
 
-    def add_load(self, nth: int, time_s: float) -> None:
+    def add_load(self, nth: int, tid: TimeId, time_s: float) -> None:
         self.loads.append(
             LoadStat(
                 nth=nth,
+                tid=tid,
                 time_s=time_s,
             )
         )
@@ -108,7 +110,7 @@ class ExpStat:
         self.load_sum_t_s += time_s
         load_avg_t_s = self.load_sum_t_s / len(self.loads)
         logger.info(
-            f"nth= {nth}, t= {strf_deltatime(time_s)}"
+            f"nth= {nth}, tid= {tid}, t= {strf_deltatime(time_s)}"
             f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})"
         )
 
