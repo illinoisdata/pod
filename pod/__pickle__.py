@@ -89,12 +89,14 @@ if BASE_PICKLE == "dill":
             this_page = TarjanPage(
                 names=set(), globs={}, index=self._index_counter, low_index=self._index_counter, on_stack=True, has_seen=False
             )
-            self._book[id(func)] = this_page
+            this_func = func
+            self._book[id(this_func)] = this_page
             self._index_counter += 1
-            self._page_stack.append(func)
+            self._page_stack.append(this_func)
 
             if dill.detect.ismethod(func):
-                this_page.names = func.__func__
+                func = func.__func__
+
             if dill.detect.isfunction(func):
                 this_page.globs = vars(dill.detect.getmodule(sum)).copy() if builtin else {}
                 # get references from within closure
@@ -148,7 +150,7 @@ if BASE_PICKLE == "dill":
                     next_page.has_seen = True
                     this_page.names.update(next_page.names)
                     next_page.names = this_page.names
-                    if next_func is func:
+                    if next_func is this_func:
                         break
                     # print(f"SCC: {func} <--> {next_func}")
             return dict((name, this_page.globs[name]) for name in this_page.names if name in this_page.globs)
