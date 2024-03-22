@@ -1,7 +1,9 @@
 """Python setup.py for pod package"""
 import io
 import os
-from setuptools import find_packages, setup
+from setuptools import Extension, find_packages, setup
+from Cython.Build import cythonize
+from Cython.Compiler import Options
 
 
 def read(*paths, **kwargs):
@@ -29,6 +31,27 @@ def read_requirements(path):
     ]
 
 
+# Modules to be compiled and include_dirs when necessary
+extensions = [
+    Extension(
+        "pod.memo",
+        ["pod/memo.py"],
+    ),
+    # Extension(
+    #     "pod.storage",
+    #     ["pod/storage.py"],
+    # ),
+    # Extension(
+    #     "pod.pickling",
+    #     ["pod/pickling.py"],
+    # ),
+    # Extension(
+    #     "pod._pod",
+    #     ["pod/_pod.py"],
+    # ),
+]
+
+
 setup(
     name="pod",
     version=read("pod", "VERSION"),
@@ -39,4 +62,5 @@ setup(
     author="mIXs222;SumayT9",
     packages=find_packages(exclude=["tests", ".github"]),
     install_requires=read_requirements("requirements.txt"),
+    ext_modules=cythonize(extensions, compiler_directives={"language_level": 3, "profile": False}),
 )
