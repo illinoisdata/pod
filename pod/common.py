@@ -1,3 +1,5 @@
+from __future__ import annotations  # isort:skip
+
 from dataclasses import dataclass
 from typing import Any, Dict, Set
 
@@ -16,6 +18,12 @@ class PodId:
 
     def __reduce__(self):
         return self.__class__, (self.tid, self.oid)
+
+    def __eq__(self, other: PodId):
+        return self.tid == other.tid and self.oid == other.oid
+
+    def __hash__(self):
+        return hash(self.tid) + hash(self.oid)
 
     def redis_str(self) -> str:
         return str(self.tid) + "|" + str(self.oid)

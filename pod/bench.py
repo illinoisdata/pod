@@ -307,6 +307,8 @@ class SUT:
 
 
 def run_exp1_impl(args: BenchArgs) -> None:
+    from scalene import scalene_profiler
+
     # Setup random state.
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -339,9 +341,11 @@ def run_exp1_impl(args: BenchArgs) -> None:
         exec_stop_ts = time.time()
 
         # Dump current state.
+        # scalene_profiler.start()
         dump_start_ts = time.time()
         tid = sut.save(the_locals)
         dump_stop_ts = time.time()
+        # scalene_profiler.stop()
 
         # Record measurements.
         tids.append(tid)

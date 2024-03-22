@@ -40,7 +40,6 @@ def deserialize_pod_id(serialized_pod_id: bytes) -> PodId:
 def union_find(pids: Set[PodId], deps: Dict[PodId, PodDependency]) -> Dict[PodId, PodId]:
     # Filter out unrelated deps, assuming no edge between two tids.
     related_tids = set(pid.tid for pid in pids)
-    related_deps = {pid: dep for pid, dep in deps.items() if pid.tid in related_tids}
 
     # Path compression.
     roots: Dict[PodId, PodId] = {}
@@ -52,9 +51,11 @@ def union_find(pids: Set[PodId], deps: Dict[PodId, PodDependency]) -> Dict[PodId
         return roots[pid]
 
     # Union find iterations.
-    for pid, dep in related_deps.items():
+    for pid, dep in deps.items():
+        if pid.tid not in related_tids:
+            continue
         for pid2 in dep.dep_pids:
-            if related_deps[pid2].immutable:
+            if deps[pid2].immutable:
                 # logger.info(f"Skipping {pid} -> {pid2} (immutable)")
                 continue
             # if dep.immutable:
@@ -252,6 +253,7 @@ class FilePodStorageStats:
 
 class FilePodStorageWriter(PodWriter):
     FLUSH_SIZE = 1_000_000  # 1 MB
+    SMALL_POD_SIZE = 1024  # 1 KB
 
     def __init__(self, storage: FilePodStorage) -> None:
         self.storage = storage
@@ -279,12 +281,14 @@ class FilePodStorageWriter(PodWriter):
             self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
 
             # Write to buffer.
-            if self.pod_page_buffer_size > 0 and self.pod_page_buffer_size + len(pod_bytes) > FilePodStorageWriter.FLUSH_SIZE:
-                self.flush_pod()  # Flush smaller buffer first, before combining with the larger object.
-            self.pod_page_buffer[pod_id] = pod_bytes
-            self.pod_page_buffer_size += len(pod_bytes)
-            if self.pod_page_buffer_size > FilePodStorageWriter.FLUSH_SIZE:
-                self.flush_pod()
+            if len(pod_bytes) > FilePodStorageWriter.SMALL_POD_SIZE:
+                # Write bigger pod bytes individually.
+                self.flush_pod_impl({pod_id: pod_bytes})
+            else:
+                self.pod_page_buffer[pod_id] = pod_bytes
+                self.pod_page_buffer_size += len(pod_bytes)
+                if self.pod_page_buffer_size > FilePodStorageWriter.FLUSH_SIZE:
+                    self.flush_pod()
 
     def write_dep(
         self,
@@ -294,17 +298,19 @@ class FilePodStorageWriter(PodWriter):
         self.dep_page_buffer[pod_id] = dep
 
     def flush_pod(self) -> None:
+        self.flush_pod_impl(self.pod_page_buffer)
+        self.pod_page_buffer = {}
+        self.pod_page_buffer_size = 0
+
+    def flush_pod_impl(self, pod_page_buffer: FilePodStoragePodPage):
         # Write buffer.
         page_idx = self.storage.next_pod_page_idx()
         with open(self.storage.pod_page_path(page_idx), "wb") as f:
-            pickle.dump(self.pod_page_buffer, f)
+            pickle.dump(pod_page_buffer, f)
 
         # Update index.
-        self.new_pid_index.update({pid: page_idx for pid in self.pod_page_buffer})
+        self.new_pid_index.update({pid: page_idx for pid in pod_page_buffer})
 
-        # Reset buffer state.
-        self.pod_page_buffer = {}
-        self.pod_page_buffer_size = 0
 
     def flush_dep(self) -> None:
         # Write buffer.
