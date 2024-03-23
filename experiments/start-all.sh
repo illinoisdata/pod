@@ -1,15 +1,17 @@
 #!/bin/bash
-if [ "$#" -ne 1 ]
+if [ "$#" -ne 2 ]
 then
-    echo "Require 1 argument (COMPOSE_NAME), $# provided"
-    echo 'Example: bash experiments/start-all.sh pod_${USER}'
+    echo "Require 2 arguments (COMPOSE_NAME), (DATA_VOLUME) $# provided"
+    echo 'Example: bash experiments/start-all.sh pod_${USER} /data/elastic-notebook/data'
     exit 1
 fi
 
 COMPOSE_NAME=$1
-echo "Using COMPOSE_NAME= ${COMPOSE_NAME}"
+DATA_VOLUME=$2
+echo "Using COMPOSE_NAME= ${COMPOSE_NAME} and DATA_VOLUME = ${DATA_VOLUME}"
 sleep 3
 
+export POD_NBDATA=${DATA_VOLUME}
 docker build -t pod -f experiments/pod.Dockerfile . && \
     docker build -t podnogil -f experiments/podnogil.Dockerfile . && \
     docker compose -f experiments/docker-compose.yml -p ${COMPOSE_NAME} up

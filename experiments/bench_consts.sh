@@ -8,6 +8,7 @@ POD_DIR=/tmp/pod
 
 NB_MAP=(
     "rmlist rmlist"
+
     "storesfg notebooks/store-sales-ts-forecasting-a-comprehensive-guide.ipynb"
     "itsttime notebooks/it-s-that-time-of-the-year-again.ipynb"
     "buildats notebooks/building-an-asset-trading-strategy.ipynb"
