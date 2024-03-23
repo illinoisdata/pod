@@ -7,7 +7,7 @@ services:
     stdin_open: true
     volumes:
       - ${PWD}:/pod
-      - neo4j_data:/neo4j_data/data
+      - /data/elastic-notebook/data:/pod/nbdata
     working_dir: /pod
     command: ["/bin/bash"]
 
@@ -18,7 +18,7 @@ services:
     stdin_open: true
     volumes:
       - ${PWD}:/pod
-      - neo4j_data:/neo4j_data/data
+      - /data/elastic-notebook/data:/pod/nbdata
     working_dir: /pod
     command: ["/bin/bash"]
 
@@ -41,20 +41,20 @@ services:
       - redis_data:/data
     command: ["redis-server", "--port", "6379"]
 
-  podneo4j:
-    # image: neo4j:5.15.0-community-bullseye
-    image: neo4j:5.15.0-enterprise-bullseye
-    hostname: podneo4j
-    tty: true
-    stdin_open: true
-    volumes:
-      - neo4j_data:/data
-    environment:
-      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"  # Using Neo4j Developer License (https://neo4j.com/licensing/)
-      NEO4J_AUTH: neo4j/podneo4jPassword
-      NEO4J_server_memory_pagecache_size: 2G
-      NEO4J_server_memory_heap_max__size: 2G
-    command: ["neo4j"]
+  # podneo4j:
+  #   # image: neo4j:5.15.0-community-bullseye
+  #   image: neo4j:5.15.0-enterprise-bullseye
+  #   hostname: podneo4j
+  #   tty: true
+  #   stdin_open: true
+  #   volumes:
+  #     - neo4j_data:/data
+  #   environment:
+  #     NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"  # Using Neo4j Developer License (https://neo4j.com/licensing/)
+  #     NEO4J_AUTH: neo4j/podneo4jPassword
+  #     NEO4J_server_memory_pagecache_size: 2G
+  #     NEO4J_server_memory_heap_max__size: 2G
+  #   command: ["neo4j"]
 
   podmongo:
     image: mongo:7.0.5-jammy
@@ -64,4 +64,4 @@ services:
 
 volumes:
   redis_data:
-  neo4j_data:
+  # neo4j_data:
