@@ -72,6 +72,11 @@ class PoddingModel:
         raise NotImplementedError("Abstract method")
 
 
+class NaivePoddingModel(PoddingModel):
+    def podding_fn(self, obj: Object, pickler: BasePickler) -> PodAction:
+        return PodAction.split
+
+
 class ConservativePoddingModel(PoddingModel):
     def __init__(self) -> None:
         self._actions: Dict[ObjectId, PodAction] = {}

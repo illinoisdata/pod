@@ -65,6 +65,7 @@ SUTS=(
     "pmg"
     "pflc"
     "prcc"
+    "pnv"
 )
 
 function get_sut_args() {
@@ -106,6 +107,12 @@ function get_sut_args() {
     elif [[ $_SUT == "prcc" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --enable_feature --podding_model roc-collect"
+    elif [[ $_SUT == "pnv" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive"
+    elif [[ $_SUT == "pna" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive --sut_async"
     else
         echo "ERROR (get_sut_args): Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
@@ -132,6 +139,12 @@ function prepare_sut() {
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pga" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pnv" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pna" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "ppg" ]]

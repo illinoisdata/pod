@@ -21,7 +21,14 @@ from loguru import logger
 from pod._pod import AsyncPodObjectStorage, Namespace, ObjectStorage, PodObjectStorage, SnapshotObjectStorage
 from pod.common import TimeId
 from pod.feature import __FEATURE__
-from pod.model import FeatureCollectorModel, GreedyPoddingModel, RandomPoddingModel, RoCFeatureCollectorModel, XGBRegressorRoC
+from pod.model import (
+    FeatureCollectorModel,
+    GreedyPoddingModel,
+    NaivePoddingModel,
+    RandomPoddingModel,
+    RoCFeatureCollectorModel,
+    XGBRegressorRoC,
+)
 from pod.pickling import (
     ManualPodding,
     PoddingFunction,
@@ -237,6 +244,9 @@ class SUT:
     def podding_model(args: BenchArgs) -> Tuple[PoddingFunction, Optional[PostPoddingFunction]]:
         if args.podding_model == "manual":
             return ManualPodding.podding_fn, None
+        elif args.podding_model == "naive":
+            naive_model = NaivePoddingModel()
+            return naive_model.podding_fn, None
         elif args.podding_model == "greedy":
             assert args.roc_path is not None, "greedy requires --roc_path"
             roc_model = XGBRegressorRoC.load_from(args.roc_path)
