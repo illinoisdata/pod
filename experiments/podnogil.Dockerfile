@@ -50,8 +50,12 @@ RUN python -m pip install -r /pod/requirements.txt
 # Install Pod
 COPY ./pod /pod/pod
 COPY ./setup.py /pod/setup.py
+COPY ./Makefile /pod/Makefile
 COPY ./README.md /pod/README.md
-RUN python -m pip install -e /pod/
+
+WORKDIR /pod
+RUN python -m pip install -e .
+RUN make compile
 
 WORKDIR /
 ENTRYPOINT /bin/bash

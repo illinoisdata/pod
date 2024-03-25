@@ -32,23 +32,14 @@ def read_requirements(path):
 
 
 # Modules to be compiled and include_dirs when necessary
-extensions = [
-    Extension(
-        "pod.memo",
-        ["pod/memo.py"],
-    ),
-    # Extension(
-    #     "pod.storage",
-    #     ["pod/storage.py"],
-    # ),
-    # Extension(
-    #     "pod.pickling",
-    #     ["pod/pickling.py"],
-    # ),
-    # Extension(
-    #     "pod._pod",
-    #     ["pod/_pod.py"],
-    # ),
+cython_extensions = [
+    Extension("pod.memo", ["pod/memo.py"]),
+    # Extension("pod.storage", ["pod/storage.py"]),
+    # Extension("pod.pickling", ["pod/pickling.py"]),
+    # Extension("pod._pod", ["pod/_pod.py"]),
+]
+c_extensions = [
+    Extension('pod.algo', ['pod/algo.cc']),
 ]
 
 
@@ -62,5 +53,8 @@ setup(
     author="mIXs222;SumayT9",
     packages=find_packages(exclude=["tests", ".github"]),
     install_requires=read_requirements("requirements.txt"),
-    ext_modules=cythonize(extensions, compiler_directives={"language_level": 3, "profile": False}),
+    ext_modules=[
+        *cythonize(cython_extensions, compiler_directives={"language_level": 3, "profile": False}),
+        *c_extensions,
+    ],
 )

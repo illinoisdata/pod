@@ -333,6 +333,7 @@ class StaticPodPickler(BaseStaticPodPickler):
         root_pid: PodId,
         ctx: StaticPodPicklerContext,
         writer: PodWriter,
+        pod_depth: int,
         file: io.IOBase,
         pickle_kwargs: Dict[str, Any] = {},
     ) -> None:
@@ -343,6 +344,7 @@ class StaticPodPickler(BaseStaticPodPickler):
         self.root_rank = next_rank()
         self.ctx = ctx
         self.writer = writer
+        self.pod_depth = pod_depth
         self.file = file
         self.pickle_kwargs = pickle_kwargs
 
@@ -374,6 +376,7 @@ class StaticPodPickler(BaseStaticPodPickler):
                 self.ctx,
                 self.writer,
                 is_final=(pod_action == PodAction.split_final),
+                pod_depth=self.pod_depth + 1,
                 pickle_kwargs=self.pickle_kwargs,
             )
         self.root_dep_pids.add(pid)
@@ -407,6 +410,7 @@ class StaticPodPickler(BaseStaticPodPickler):
         ctx: StaticPodPicklerContext,
         writer: PodWriter,
         is_final: bool = False,
+        pod_depth: int = 0,
         pickle_kwargs: Dict[str, Any] = {},
     ) -> None:
         # Now we have seen this object ID.
@@ -417,7 +421,7 @@ class StaticPodPickler(BaseStaticPodPickler):
         this_pickler = (
             FinalPodPickler(this_obj, this_pid, ctx, this_buffer, **pickle_kwargs)
             if is_final
-            else StaticPodPickler(this_obj, this_pid, ctx, writer, this_buffer, pickle_kwargs)
+            else StaticPodPickler(this_obj, this_pid, ctx, writer, pod_depth, this_buffer, pickle_kwargs)
         )
         this_pickler.dump(this_obj)
         this_pod_bytes = this_buffer.getvalue()

@@ -103,6 +103,7 @@ class GreedyPoddingModel(ConservativePoddingModel):
         NoneType,
         type,
     )
+    SPLIT_FINAL_AT_DEP = 10
 
     def __init__(
         self,
@@ -132,6 +133,8 @@ class GreedyPoddingModel(ConservativePoddingModel):
             self._pod_cr[pickler.root_pid] = bundle_cr
             return PodAction.bundle
         elif split_cost == min_cost:
+            if pickler.pod_depth >= GreedyPoddingModel.SPLIT_FINAL_AT_DEP:
+                return PodAction.split_final
             return PodAction.split
         elif split_final_cost == min_cost:
             return PodAction.split_final

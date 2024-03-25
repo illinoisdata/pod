@@ -81,7 +81,7 @@ class StaticPodPicklerMemo:
         return StaticPodPicklerMemoView(self, pid)
 
 
-class StaticPodPicklerMemoView:
+class StaticPodPicklerMemoView(dict):
     def __init__(self, memo: StaticPodPicklerMemo, pid: PodId) -> None:
         self.memo: StaticPodPicklerMemo = memo
         self.pid = pid
@@ -137,7 +137,7 @@ class StaticPodUnpicklerMemo:
         return StaticPodUnpicklerMemoView(self, page_offsets)
 
 
-class StaticPodUnpicklerMemoView:
+class StaticPodUnpicklerMemoView(dict):
     def __init__(self, memo: StaticPodUnpicklerMemo, page_offsets: List[MemoId]) -> None:
         self.memo: StaticPodUnpicklerMemo = memo
         self.page_offsets = page_offsets
