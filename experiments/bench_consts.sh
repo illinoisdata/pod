@@ -59,12 +59,15 @@ SUTS=(
     "pfa"
     "pgl"
     "pga"
+    "pnv"
+    "pna"
     "ppg"
     "prd"
     "pnj"
     "pmg"
     "pflc"
     "prcc"
+
 )
 
 function get_sut_args() {
@@ -88,6 +91,12 @@ function get_sut_args() {
     elif [[ $_SUT == "pga" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy --roc_path models/roc_model.pkl --sut_async"
+    elif [[ $_SUT == "pnv" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive"
+    elif [[ $_SUT == "pna" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive --sut_async"
     elif [[ $_SUT == "ppg" ]]
     then
         sut_args="--sut pod_psql --psql_hostname podpsql --psql_port 5432"
@@ -132,6 +141,12 @@ function prepare_sut() {
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pga" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pnv" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pna" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "ppg" ]]
