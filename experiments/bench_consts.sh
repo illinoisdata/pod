@@ -59,13 +59,15 @@ SUTS=(
     "pfa"
     "pgl"
     "pga"
+    "pnv"
+    "pna"
     "ppg"
     "prd"
     "pnj"
     "pmg"
     "pflc"
     "prcc"
-    "pnv"
+
 )
 
 function get_sut_args() {
@@ -89,6 +91,12 @@ function get_sut_args() {
     elif [[ $_SUT == "pga" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy --roc_path models/roc_model.pkl --sut_async"
+    elif [[ $_SUT == "pnv" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive"
+    elif [[ $_SUT == "pna" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive --sut_async"
     elif [[ $_SUT == "ppg" ]]
     then
         sut_args="--sut pod_psql --psql_hostname podpsql --psql_port 5432"
@@ -107,12 +115,6 @@ function get_sut_args() {
     elif [[ $_SUT == "prcc" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --enable_feature --podding_model roc-collect"
-    elif [[ $_SUT == "pnv" ]]
-    then
-        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive"
-    elif [[ $_SUT == "pna" ]]
-    then
-        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive --sut_async"
     else
         echo "ERROR (get_sut_args): Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
