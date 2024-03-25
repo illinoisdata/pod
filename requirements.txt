@@ -1,6 +1,7 @@
 black
 bokeh
 catboost
+Cython
 dataclasses
 dataclasses-json
 dill

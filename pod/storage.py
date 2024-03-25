@@ -23,6 +23,7 @@ from loguru import logger
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 from pod.common import PodDependency, PodId, make_pod_id
+from pod.algo import union_find_all
 
 POD_CACHE_SIZE = 2_000_000_000
 
@@ -319,7 +320,7 @@ class FilePodStorageWriter(PodWriter):
             pickle.dump(self.dep_page_buffer, f)
 
         # Save to in-memory storage.
-        self.storage.deps.update(self.dep_page_buffer)
+        self.storage.update_deps(self.dep_page_buffer)
 
         # Reset buffer state.
         self.dep_page_buffer = {}
@@ -392,6 +393,7 @@ class FilePodStorage(PodStorage):
         self.pid_synonym: PodIdSynonym = {}
         self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
         self.deps: FilePodStoragePodIdDep = {}
+        self.roots = {}
         if self.is_init():
             self.stats = self.reload_stats()
             self.pid_index = self.reload_index()
@@ -421,7 +423,12 @@ class FilePodStorage(PodStorage):
         return FilePodStorageReader(self, seen_pid, page_idxs)
 
     def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
-        return union_find(pod_ids, self.deps)
+        return {pid: self.roots.get(pid, pid) for pid in pod_ids}
+
+    def update_deps(self, new_deps: FilePodStoragePodIdDep) -> None:
+        self.deps.update(new_deps)
+        for pid, root_pid in union_find_all(new_deps):
+            self.roots[pid] = root_pid
 
     def estimate_size(self) -> int:
         return sum(f.stat().st_size for f in self.root_dir.glob("**/*") if f.is_file())
@@ -932,6 +939,7 @@ class RedisPodStorageWriter(PodWriter):
         self.storage = storage
         self.pod_data: Dict[PodId, bytes] = {}
         self.dependency_map: Dict[PodId, Set[str]] = {}
+        self.new_deps: FilePodStoragePodIdDep = {}
         self.new_pid_synonyms: Dict[PodId, PodId] = {}
         self.new_ranks: Dict[PodId, int] = {}
 
@@ -939,9 +947,6 @@ class RedisPodStorageWriter(PodWriter):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.flush_data()
-
-    def flush_data(self):
         with self.storage.redis_client.pipeline() as pipe:
             for pod_id, pod_bytes in self.pod_data.items():  # Every pod written is either in pod data or pod synonyms
                 pipe.set(f"pod_bytes:{pod_id.redis_str()}", pod_bytes)
@@ -957,6 +962,7 @@ class RedisPodStorageWriter(PodWriter):
                         pipe.sadd(f"dep_pids:{pod_id.redis_str()}", *(self.dependency_map[pod_id]))
                     pipe.set(f"pod_ranks:{pod_id.redis_str()}", self.new_ranks[pod_id])
             pipe.execute()
+        self.storage.update_deps(self.new_deps)
         self.new_pid_synonyms = {}
         self.dependency_map = {}
         self.pod_data = {}
@@ -970,6 +976,7 @@ class RedisPodStorageWriter(PodWriter):
             self.pod_data[pod_id] = pod_bytes
 
     def write_dep(self, pod_id: PodId, dep: PodDependency) -> None:
+        self.new_deps[pod_id] = dep
         serialized_dep_pids = {pid.redis_str() for pid in dep.dep_pids}
         self.dependency_map[pod_id] = serialized_dep_pids
         self.new_ranks[pod_id] = dep.rank
@@ -994,6 +1001,9 @@ class RedisPodStorageReader(PodReader):
             self.cache[pod_id] = pod_bytes
         return io.BytesIO(self.cache[pod_id])
 
+    def read_meta(self, pod_id: PodId) -> bytes:
+        return self.storage.deps[pod_id].meta
+
     def dep_pids_by_rank(self) -> List[PodId]:
         return sorted(self.ranks.keys(), key=lambda k: self.ranks[k])
 
@@ -1003,6 +1013,8 @@ class RedisPodStorage(PodStorage):
         self.redis_client = redis.Redis(host=host, port=port)
         self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
         self.synonyms: PodIdSynonym = {}
+        self.deps: FilePodStoragePodIdDep = {}
+        self.roots = {}
         self._fetch_synonyms()
 
     def _fetch_synonyms(self):
@@ -1062,6 +1074,14 @@ class RedisPodStorage(PodStorage):
             pod_bytes = syn_results[i]
             loaded_pod_bytes[PodId.from_redis_str(syn_pod_ids[i])] = pod_bytes
         return RedisPodStorageReader(self, hint_pod_ids, loaded_pod_bytes, pid_ranks)
+
+    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
+        return {pid: self.roots.get(pid, pid) for pid in pod_ids}
+
+    def update_deps(self, new_deps: FilePodStoragePodIdDep) -> None:
+        self.deps.update(new_deps)
+        for pid, root_pid in union_find_all(new_deps):
+            self.roots[pid] = root_pid
 
     def estimate_size(self) -> int:
         memory_data = self.redis_client.info("memory")
