@@ -31,9 +31,10 @@ pip-chill
 prophet
 psycopg2-binary
 psycopg2
-pymongo
+pyarrow
 pymongo
 pytest-cov
+pywavelets
 redis
 scalene
 seaborn
@@ -42,6 +43,7 @@ simple-parsing
 spacy
 statsmodels
 tensorflow
+textblob
 torchvision
 transformers
 uri-template

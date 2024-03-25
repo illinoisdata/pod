@@ -15,6 +15,14 @@ NB_MAP=(
     # "spacestt notebooks/spaceship-titanic-a-complete-guide.ipynb"
     "betterxb notebooks/better-xgb-baseline.ipynb"
     "tpsmay22 notebooks/tpsmay22-insightful-eda-fe-baseline.ipynb"
+    "denoisdw notebooks/denoising-with-direct-wavelet-transform.ipynb"
+    "denoisft notebooks/fast-fourier-transform-denoising.ipynb"
+    "ai4code notebooks/ai4code-detailed-eda.ipynb"
+    "covid193 notebooks/cv19w3-2-v2-play-2-v3fix-sub-last6dayopt.ipynb"
+    # "twittnet notebooks/twitter_networks.ipynb"
+    "skltweet notebooks/sklearn_tweet_classification.ipynb"
+    # "trainlms notebooks/04_training_linear_models.ipynb"
+
 )
 
 # Parse into two arrays.
