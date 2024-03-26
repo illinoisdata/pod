@@ -9,8 +9,8 @@ from pod.common import ObjectId, PodId
 
 
 def when_enabled(fn):
-    def _fn(*args, **kwargs):
-        if _Feature.is_enabled():
+    def _fn(self, *args, **kwargs):
+        if self.is_enabled:
             # print(fn.__name__)
             return fn(self, *args, **kwargs)
         return None
@@ -79,101 +79,99 @@ class ChangeTracker:
 
 
 class _Feature:
-    in_block: bool = False
-    cfg: Dict[str, Any] = {
-        "track_change": True
-    }
-
-    def is_enabled() -> bool:
-        return _Feature.in_block
+    def __init__(self, **cfg) -> None:
+        self.is_enabled: bool = False
+        self.cfg: Dict[str, Any] = cfg
 
     def __enter__(self) -> _Feature:
-        assert not self.in_block
-        _Feature.in_block = True
-        _Feature.init_feature()
-        return _Feature
+        assert not self.is_enabled
+        self.is_enabled = True
+        self.init_feature()
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        assert _Feature.in_block
-        _Feature.del_feature()
-        _Feature.in_block = False
+        assert self.is_enabled
+        self.del_feature()
+        self.is_enabled = False
 
     """ Feature setup and teardown. """
 
-    def init_feature():
-        _Feature.time_count = 0
-        if _Feature.cfg.get("track_change"):
-            _Feature._track_change = ChangeTracker()
+    def init_feature(self):
+        self.time_count = 0
+        if self.cfg.get("track_change"):
+            self._track_change = ChangeTracker()
 
-    def del_feature():
-        del _Feature.time_count
-        if _Feature.cfg.get("track_change"):
-            del _Feature._track_change
+    def del_feature(self):
+        del self.time_count
+        if self.cfg.get("track_change"):
+            del self._track_change
 
     """ Feature collections. """
 
     @when_enabled
-    def new_dump():
-        _Feature.time_count += 1
-        if _Feature.cfg.get("track_change"):
-            _Feature._track_change.new_dump()
+    def new_dump(self):
+        self.time_count += 1
+        if self.cfg.get("track_change"):
+            self._track_change.new_dump()
 
     @when_enabled
-    def new_pod_oid(pid: PodId, oid: ObjectId):
-        if _Feature.cfg.get("track_change"):
-            _Feature._track_change.new_pod_oid(pid, oid)
+    def new_pod_oid(self, pid: PodId, oid: ObjectId):
+        if self.cfg.get("track_change"):
+            self._track_change.new_pod_oid(pid, oid)
 
     @when_enabled
-    def new_pod(pid: PodId, pod_bytes: bytes):
-        if _Feature.cfg.get("track_change"):
-            _Feature._track_change.new_pod(pid, pod_bytes)
+    def new_pod(self, pid: PodId, pod_bytes: bytes):
+        if self.cfg.get("track_change"):
+            self._track_change.new_pod(pid, pod_bytes)
 
     """ Feature retrieval. """
 
     @when_enabled
-    def pod_max_change_prob(pid: PodId) -> Optional[float]:
-        if _Feature.cfg.get("track_change"):
-            return _Feature._track_change.pod_max_change_prob(pid)
+    def pod_max_change_prob(self, pid: PodId) -> Optional[float]:
+        if self.cfg.get("track_change"):
+            return self._track_change.pod_max_change_prob(pid)
         return None
 
     @when_enabled
-    def oid_count(oid: ObjectId) -> Optional[int]:
-        if _Feature.cfg.get("track_change"):
-            return _Feature._track_change.oid_count(oid)
+    def oid_count(self, oid: ObjectId) -> Optional[int]:
+        if self.cfg.get("track_change"):
+            return self._track_change.oid_count(oid)
         return None
 
     @when_enabled
-    def oid_change_count(oid: ObjectId) -> Optional[int]:
-        if _Feature.cfg.get("track_change"):
-            return _Feature._track_change.oid_change_count(oid)
+    def oid_change_count(self, oid: ObjectId) -> Optional[int]:
+        if self.cfg.get("track_change"):
+            return self._track_change.oid_change_count(oid)
         return None
 
     @when_enabled
-    def oid_change_prob(oid: ObjectId) -> Optional[float]:
-        if _Feature.cfg.get("track_change"):
-            return _Feature._track_change.oid_change_prob(oid)
+    def oid_change_prob(self, oid: ObjectId) -> Optional[float]:
+        if self.cfg.get("track_change"):
+            return self._track_change.oid_change_prob(oid)
         return None
 
     @when_enabled
-    def change_probs_hist(bins=10) -> Optional[Tuple[List[int], List[float]]]:
-        if _Feature.cfg.get("track_change"):
-            return _Feature._track_change.change_probs_hist(bins=bins)
+    def change_probs_hist(self, bins=10) -> Optional[Tuple[List[int], List[float]]]:
+        if self.cfg.get("track_change"):
+            return self._track_change.change_probs_hist(bins=bins)
         return None
 
     @when_enabled
-    def has_changed(oid: ObjectId) -> Optional[bool]:
-        if _Feature.cfg.get("track_change"):
-            return _Feature._track_change.has_changed(oid)
+    def has_changed(self, oid: ObjectId) -> Optional[bool]:
+        if self.cfg.get("track_change"):
+            return self._track_change.has_changed(oid)
         return None
 
 
-__FEATURE__ = _Feature
+__FEATURE__ = _Feature(
+    track_change=True,
+)
 
 
 if __name__ == "__main__":
-    print(__FEATURE__.is_enabled())
+    print(__FEATURE__.is_enabled)
     with __FEATURE__ as feature:
-        print(feature, __FEATURE__, __FEATURE__.is_enabled())
+        print(feature, __FEATURE__, __FEATURE__.is_enabled)
         __FEATURE__.new_dump()
         __FEATURE__.new_pod_oid(PodId(1, 1), 1)
         __FEATURE__.new_pod_oid(PodId(1, 1), 2)
@@ -185,4 +183,4 @@ if __name__ == "__main__":
         __FEATURE__.new_pod(PodId(1, 2), b"3")
         print(f"{__FEATURE__.oid_change_count(1)} / {__FEATURE__.oid_count(1)}")
         print(f"{__FEATURE__.oid_change_count(2)} / {__FEATURE__.oid_count(2)}")
-    print(__FEATURE__.is_enabled())
+    print(__FEATURE__.is_enabled)

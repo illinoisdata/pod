@@ -69,7 +69,7 @@ class StaticPodPicklerMemo:
         memo_id, obj = self.physical_memo[obj_id]
         return memo_id, obj, self.page_pid[memo_id - memo_id % MemoPageAllocator.PAGE_SIZE]
 
-    def __contains__(self, obj_id: ObjectId) -> bool:
+    def __contains__(self, obj_id: object) -> bool:  # Container supertype.
         return obj_id in self.physical_memo
 
     def clear(self) -> None:
@@ -113,7 +113,7 @@ class StaticPodPicklerMemoView(dict):
             self.dep_pids.append(dep_pid)
         return (memo_id, obj)
 
-    def __contains__(self, obj_id: ObjectId) -> bool:
+    def __contains__(self, obj_id: object) -> bool:  # Container supertype.
         return obj_id in self.memo
 
     def get(self, obj_id: ObjectId, default: Object = None) -> Optional[Tuple[MemoId, Object]]:

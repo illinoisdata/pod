@@ -41,9 +41,10 @@ typedef struct {
 PodId find_root(PodId pid, RootsDict& roots_dict);
 
 // Union find with path compression
-static PyObject* union_find_all(PyObject *self, PyObject *args) {
+static PyObject* union_find(PyObject *self, PyObject *args) {
     PyObject *deps_dict;
     if (!PyArg_ParseTuple(args, "O", &deps_dict)) {
+        PyErr_SetString(PyExc_TypeError, "Expected pod dependency dictionary");
         return NULL;
     }
 
@@ -66,12 +67,12 @@ static PyObject* union_find_all(PyObject *self, PyObject *args) {
 
         PyObject *dep_pids = PyObject_GetAttrString(dep, "dep_pids");
 
+        // Iterate over outgoing edge from this pid.
         PyObject *iter = PyObject_GetIter(dep_pids);
         if (!iter) {
-            PyErr_SetString(PyExc_TypeError, "Object is not iterable");
+            PyErr_SetString(PyExc_TypeError, "dep_pids is not iterable");
             return NULL;
         }
-        // Iterate over the set and extract tid and oid from each PodId object
         PyObject *pid2_key;
         while ((pid2_key = PyIter_Next(iter))) {
             PodId pid2;
@@ -108,7 +109,7 @@ static PyObject* union_find_all(PyObject *self, PyObject *args) {
     return py_roots_dict;
 }
 
-// Define find_root function
+// Find root with path compression.
 PodId find_root(PodId pid, RootsDict& roots_dict) {
     auto it = roots_dict.find(pid);
     if (it == roots_dict.end() || it->second == pid) {
@@ -119,7 +120,7 @@ PodId find_root(PodId pid, RootsDict& roots_dict) {
 
 // Method mapping
 static PyMethodDef methods[] = {
-    {"union_find_all", union_find_all, METH_VARARGS, "Union find with path compression"},
+    {"union_find", union_find, METH_VARARGS, "Union find with path compression"},
     {NULL, NULL, 0, NULL} // Sentinel
 };
 

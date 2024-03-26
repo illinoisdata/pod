@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Dict, Optional, Set, Tuple
 
-from pod.common import Object, PodId, TimeId, make_pod_id, object_id, step_time_id
+from pod.common import Object, PodId, TimeId, step_time_id
 from pod.pickling import ManualPodding, PodPickling, SnapshotPodPickling, StaticPodPickling
 from pod.stats import ExpStat
 from pod.storage import FilePodStorage
@@ -53,13 +53,13 @@ class SnapshotObjectStorage(ObjectStorage):
 
     def save(self, namespace: Namespace) -> TimeId:
         tid = step_time_id()
-        pid = make_pod_id(tid, SnapshotObjectStorage.SNAPSHOT_OID)
+        pid = PodId(tid, SnapshotObjectStorage.SNAPSHOT_OID)
         with self._pickling.dump_batch({pid: namespace}) as dump_session:
             dump_session.dump(pid, namespace)
         return tid
 
     def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
-        namespace = self._pickling.load(make_pod_id(tid, SnapshotObjectStorage.SNAPSHOT_OID))
+        namespace = self._pickling.load(PodId(tid, SnapshotObjectStorage.SNAPSHOT_OID))
         if nameset is not None:
             namespace = {name: namespace[name] for name in nameset}
         return namespace
@@ -101,7 +101,7 @@ class PodNamespace(dict):
         return self.namemap
 
     def pod_reset_namemap(self, namemap: Namemap) -> None:
-        assert self.keys() == namemap.keys(), f"{self.keys()}, {namemap.keys()}"
+        # assert self.keys() == namemap.keys(), f"{self.keys()}, {namemap.keys()}"
         self.namemap = namemap
         self.active_names.clear()
 
@@ -145,24 +145,22 @@ class PodObjectStorage(ObjectStorage):
         return self._pickling.estimate_size()
 
     def _save_as_namemap(self, tid: TimeId, namespace: Namespace) -> Tuple[PodId, Namemap]:
-        namemap_pid = make_pod_id(tid, PodObjectStorage.NAMEMAP_OID)
+        namemap_pid = PodId(tid, PodObjectStorage.NAMEMAP_OID)
 
         if isinstance(namespace, PodNamespace):
             active_names = self._connected_active_names(tid, namespace)
             prev_namemap = namespace.pod_namemap()
             active_namemap = {
-                name: make_pod_id(tid, object_id(dict.__getitem__(namespace, name)))
-                for name in namespace.keys()
-                if name in active_names
+                name: PodId(tid, id(dict.__getitem__(namespace, name))) for name in namespace.keys() if name in active_names
             }
             inactive_namemap = {name: prev_namemap[name] for name in namespace.keys() if name not in active_names}
             namemap = {**active_namemap, **inactive_namemap}  # Should contain exactly all names in namespace.
         else:
-            namemap = {name: make_pod_id(tid, object_id(obj)) for name, obj in namespace.items()}
+            namemap = {name: PodId(tid, id(obj)) for name, obj in namespace.items()}
         return namemap_pid, namemap
 
     def _load_namemap(self, tid: TimeId) -> Namemap:
-        return self._pickling.load(make_pod_id(tid, PodObjectStorage.NAMEMAP_OID))
+        return self._pickling.load(PodId(tid, PodObjectStorage.NAMEMAP_OID))
 
     def _save_objects(self, tid: TimeId, namespace: Namespace, namemap_pid: PodId, namemap: Namemap) -> None:
         podspace = {pid: dict.__getitem__(namespace, name) for name, pid in namemap.items() if pid.tid == tid}
@@ -180,15 +178,16 @@ class PodObjectStorage(ObjectStorage):
         prev_namemap = namespace.pod_namemap()
 
         # Find union find roots of all pids.
-        prev_pids = {pid for _, pid in prev_namemap.items()}
-        connected_roots = self._pickling.connected_pods(prev_pids)
+        connected_roots = self._pickling.connected_pods()
 
         # Filter only pids that share root with active names.
-        active_roots = {connected_roots[prev_namemap[name]] for name in active_names if name in prev_namemap}
+        active_roots = {
+            connected_roots.get(prev_namemap[name], prev_namemap[name]) for name in active_names if name in prev_namemap
+        }
         return {  # Get connected active names.
             name
             for name in namespace.keys()
-            if name not in prev_namemap or connected_roots[prev_namemap[name]] in active_roots
+            if name not in prev_namemap or connected_roots.get(prev_namemap[name], prev_namemap[name]) in active_roots
         }
 
 

@@ -263,7 +263,7 @@ class RoCFeatureCollectorModel:
             "has_changed": [],
         }
 
-        assert __FEATURE__.in_block and "track_change" in __FEATURE__.cfg
+        assert __FEATURE__.is_enabled and "track_change" in __FEATURE__.cfg
 
     def podding_fn(self, obj: Object, pickler: BasePickler) -> PodAction:
         if id(obj) not in self.oid_counters:
