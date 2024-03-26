@@ -317,7 +317,7 @@ class SUT:
 
 
 def run_exp1_impl(args: BenchArgs) -> None:
-    from scalene import scalene_profiler
+    # from scalene import scalene_profiler
 
     # Setup random state.
     random.seed(args.seed)

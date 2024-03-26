@@ -22,8 +22,8 @@ from dataclasses_json import dataclass_json
 from loguru import logger
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
-from pod.common import PodDependency, PodId, make_pod_id
-from pod.algo import union_find_all
+from pod.algo import union_find
+from pod.common import PodDependency, PodId
 
 POD_CACHE_SIZE = 2_000_000_000
 
@@ -35,38 +35,6 @@ def serialize_pod_id(pod_id: PodId) -> bytes:
 def deserialize_pod_id(serialized_pod_id: bytes) -> PodId:
     pid = pickle.loads(serialized_pod_id)
     return pid
-
-
-# Union find with path compression.
-def union_find(pids: Set[PodId], deps: Dict[PodId, PodDependency]) -> Dict[PodId, PodId]:
-    # Filter out unrelated deps, assuming no edge between two tids.
-    related_tids = set(pid.tid for pid in pids)
-
-    # Path compression.
-    roots: Dict[PodId, PodId] = {}
-
-    def find_root(pid):
-        if roots.get(pid, pid) == pid:
-            return pid
-        roots[pid] = find_root(roots[pid])
-        return roots[pid]
-
-    # Union find iterations.
-    for pid, dep in deps.items():
-        if pid.tid not in related_tids:
-            continue
-        for pid2 in dep.dep_pids:
-            if deps[pid2].immutable:
-                # logger.info(f"Skipping {pid} -> {pid2} (immutable)")
-                continue
-            # if dep.immutable:
-            #     logger.warning(f"Unexpectedly found {pid} (immutable) -> {pid2}")
-            root_pid = find_root(pid)
-            root_pid2 = find_root(pid2)
-            roots[root_pid2] = root_pid
-
-    # Filter out uninterested pids,
-    return {pid: find_root(pid) for pid in pids}
 
 
 class PodWriter:
@@ -115,7 +83,7 @@ class PodStorage:
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
         raise NotImplementedError("Abstract method")
 
-    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
+    def connected_pods(self) -> Dict[PodId, PodId]:
         raise NotImplementedError("Abstract method")
 
     def estimate_size(self) -> int:
@@ -166,6 +134,7 @@ SerializedPodId = bytes
 class DictPodStorageWriter(PodWriter):
     def __init__(self, storage: DictPodStorage) -> None:
         self.storage = storage
+        self.new_deps: Dict[PodId, PodDependency] = {}
 
     def write_pod(
         self,
@@ -179,7 +148,10 @@ class DictPodStorageWriter(PodWriter):
         pod_id: PodId,
         dep: PodDependency,
     ) -> None:
-        self.storage.deps[pod_id] = dep
+        self.new_deps[pod_id] = dep
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.storage.update_deps(self.new_deps)
 
 
 class DictPodStorageReader(PodReader):
@@ -212,6 +184,7 @@ class DictPodStorage(PodStorage):
     def __init__(self) -> None:
         self.pod_bytes: Dict[PodId, bytes] = {}
         self.deps: Dict[PodId, PodDependency] = {}
+        self.roots: Dict[PodId, PodId] = {}
 
     def writer(self) -> PodWriter:
         return DictPodStorageWriter(self)
@@ -219,8 +192,14 @@ class DictPodStorage(PodStorage):
     def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
         return DictPodStorageReader(self, hint_pod_ids)
 
-    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
-        return union_find(pod_ids, self.deps)
+    def connected_pods(self) -> Dict[PodId, PodId]:
+        return self.roots  # Assuming filtering/selection above.
+        # return {pid: self.roots.get(pid, pid) for pid in pod_ids}
+
+    def update_deps(self, new_deps: FilePodStoragePodIdDep) -> None:
+        self.deps.update(new_deps)
+        for pid, root_pid in union_find(new_deps):
+            self.roots[pid] = root_pid
 
     def estimate_size(self) -> int:
         # In memory size
@@ -312,7 +291,6 @@ class FilePodStorageWriter(PodWriter):
         # Update index.
         self.new_pid_index.update({pid: page_idx for pid in pod_page_buffer})
 
-
     def flush_dep(self) -> None:
         # Write buffer.
         page_idx = self.storage.next_dep_page_idx()
@@ -393,7 +371,7 @@ class FilePodStorage(PodStorage):
         self.pid_synonym: PodIdSynonym = {}
         self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
         self.deps: FilePodStoragePodIdDep = {}
-        self.roots = {}
+        self.roots: Dict[PodId, PodId] = {}
         if self.is_init():
             self.stats = self.reload_stats()
             self.pid_index = self.reload_index()
@@ -422,12 +400,13 @@ class FilePodStorage(PodStorage):
                     pid_queue.put(dep_pid)
         return FilePodStorageReader(self, seen_pid, page_idxs)
 
-    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
-        return {pid: self.roots.get(pid, pid) for pid in pod_ids}
+    def connected_pods(self) -> Dict[PodId, PodId]:
+        return self.roots  # Assuming filtering/selection above.
+        # return {pid: self.roots.get(pid, pid) for pid in pod_ids}
 
     def update_deps(self, new_deps: FilePodStoragePodIdDep) -> None:
         self.deps.update(new_deps)
-        for pid, root_pid in union_find_all(new_deps):
+        for pid, root_pid in union_find(new_deps):
             self.roots[pid] = root_pid
 
     def estimate_size(self) -> int:
@@ -607,7 +586,7 @@ class PostgreSQLPodStorageWriter(PodWriter):
                     VALUES {insert_values};
                 """
                 cursor.execute(insert_query)
-        self.storage.synonyms.update({make_pod_id(r[0], r[1]): make_pod_id(r[2], r[3]) for r in self.new_pid_synonyms})
+        self.storage.synonyms.update({PodId(r[0], r[1]): PodId(r[2], r[3]) for r in self.new_pid_synonyms})
         self.new_pid_synonyms = []
 
     def _flush_ranks(self):
@@ -887,7 +866,7 @@ class PostgreSQLPodStorage(PodStorage):
         results = cursor.fetchall()
         for row in results:
             tid, oid, syn_tid, syn_oid = row
-            self.synonyms[make_pod_id(tid, oid)] = make_pod_id(syn_tid, syn_oid)
+            self.synonyms[PodId(tid, oid)] = PodId(syn_tid, syn_oid)
 
     def _prefetch_bytes_and_ranks(self, cursor: psycopg2.extensions.cursor, hint_tid_oid_array: List[List]):
         cursor.execute("SELECT * FROM get_dependencies(%s::BIGINT[][]);", (hint_tid_oid_array,))
@@ -901,7 +880,7 @@ class PostgreSQLPodStorage(PodStorage):
                     cache[(tid, oid)] = bytearray()
                 cache[(tid, oid)].extend(pod_bytes)
             if rank != -1:  # Rank is -1 for pods that are only fetched as synonyms
-                ranks[make_pod_id(tid, oid)] = int(rank)
+                ranks[PodId(tid, oid)] = int(rank)
         return cache, sorted([k for k in ranks.keys()], key=lambda p: ranks[p])
 
     def writer(self) -> PodWriter:
@@ -1014,7 +993,7 @@ class RedisPodStorage(PodStorage):
         self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
         self.synonyms: PodIdSynonym = {}
         self.deps: FilePodStoragePodIdDep = {}
-        self.roots = {}
+        self.roots: Dict[PodId, PodId] = {}
         self._fetch_synonyms()
 
     def _fetch_synonyms(self):
@@ -1075,12 +1054,13 @@ class RedisPodStorage(PodStorage):
             loaded_pod_bytes[PodId.from_redis_str(syn_pod_ids[i])] = pod_bytes
         return RedisPodStorageReader(self, hint_pod_ids, loaded_pod_bytes, pid_ranks)
 
-    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
-        return {pid: self.roots.get(pid, pid) for pid in pod_ids}
+    def connected_pods(self) -> Dict[PodId, PodId]:
+        return self.roots  # Assuming filtering/selection above.
+        # return {pid: self.roots.get(pid, pid) for pid in pod_ids}
 
     def update_deps(self, new_deps: FilePodStoragePodIdDep) -> None:
         self.deps.update(new_deps)
-        for pid, root_pid in union_find_all(new_deps):
+        for pid, root_pid in union_find(new_deps):
             self.roots[pid] = root_pid
 
     def estimate_size(self) -> int:

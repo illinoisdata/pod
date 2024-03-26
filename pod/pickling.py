@@ -7,6 +7,7 @@ import pod.__pickle__  # noqa, isort:skip
 
 import enum
 import io
+from collections import defaultdict
 from dataclasses import dataclass
 from types import CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -16,7 +17,7 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 
-from pod.common import Object, ObjectId, PodDependency, PodId, TimeId, make_pod_id, next_rank, object_id, step_time_id
+from pod.common import Object, ObjectId, PodDependency, PodId, TimeId, next_rank, step_time_id
 from pod.feature import __FEATURE__
 from pod.memo import MemoId, StaticPodPicklerMemo, StaticPodUnpicklerMemo
 from pod.storage import PodReader, PodStorage, PodWriter
@@ -66,7 +67,7 @@ class PodPickling:
     def load_batch(self, pids: Set[PodId]) -> Dict[PodId, Object]:
         raise NotImplementedError("Abstract method")
 
-    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
+    def connected_pods(self) -> Dict[PodId, PodId]:
         raise NotImplementedError("Abstract method")
 
     def estimate_size(self) -> int:
@@ -92,7 +93,7 @@ class SnapshotPodPickling(PodPickling):
 
     def dump(self, obj: Object) -> PodId:
         tid = step_time_id()
-        pid = make_pod_id(tid, object_id(obj))
+        pid = PodId(tid, id(obj))
         with open(self.pickle_path(pid), "wb") as f:
             pickle.dump(obj, f)
         return pid
@@ -201,7 +202,7 @@ class StaticPodPicklerContext:
 
     @staticmethod
     def new(root_pods: Dict[PodId, Object]) -> StaticPodPicklerContext:
-        root_oids = {object_id(obj) for pid, obj in root_pods.items()}
+        root_oids = {id(obj) for pid, obj in root_pods.items()}
         return StaticPodPicklerContext(
             root_oids=root_oids,
             seen_oid=set(),
@@ -305,7 +306,8 @@ class FinalPodPickler(BaseStaticPodPickler):
         self.root_rank = next_rank()
 
     def persistent_id(self, obj: Object) -> Optional[ObjectId]:
-        __FEATURE__.new_pod_oid(self.root_pid, id(obj))
+        if __FEATURE__.is_enabled:
+            __FEATURE__.new_pod_oid(self.root_pid, id(obj))
         return None
 
     def get_root_dep(self) -> PodDependency:
@@ -354,7 +356,8 @@ class StaticPodPickler(BaseStaticPodPickler):
     def persistent_id(self, obj: Object) -> Optional[ObjectId]:
         if obj is self.root_obj:
             # Always bundle root object, otherwise infinite recursion.
-            __FEATURE__.new_pod_oid(self.root_pid, id(obj))
+            if __FEATURE__.is_enabled:
+                __FEATURE__.new_pod_oid(self.root_pid, id(obj))
             return None
         if id(obj) not in self.ctx.root_oids and isinstance(obj, StaticPodPickler.MUST_BUNDLE_TYPES):
             # Always bundle these types without checking the action cache.
@@ -366,8 +369,8 @@ class StaticPodPickler(BaseStaticPodPickler):
             return None
 
         # Split and split final.
-        oid = object_id(obj)
-        pid = make_pod_id(self.root_pid.tid, oid)
+        oid = id(obj)
+        pid = PodId(self.root_pid.tid, oid)
         if oid not in self.ctx.seen_oid:  # Only dump and write this pod once.
             self.ctx.seen_oid.add(oid)
             StaticPodPickler.dump_and_pod_write(
@@ -391,7 +394,7 @@ class StaticPodPickler(BaseStaticPodPickler):
                 self.ctx.cached_pod_actions[oid] = PodAction.bundle
             else:
                 self.ctx.cached_pod_actions[oid] = self.ctx.podding_fn(obj, self)
-                if self.ctx.cached_pod_actions[oid] == PodAction.bundle:
+                if __FEATURE__.is_enabled and self.ctx.cached_pod_actions[oid] == PodAction.bundle:
                     __FEATURE__.new_pod_oid(self.root_pid, id(obj))
         return self.ctx.cached_pod_actions[oid]
 
@@ -466,7 +469,7 @@ class StaticPodUnpickler(BaseUnpickler):
         self.ctx = ctx
         self.args = args
         self.kwargs = kwargs
-        self.meta = StaticPodPicklingMetadata.loads(self.ctx.reader.read_meta(make_pod_id(self.ctx.tid, root_oid)))
+        self.meta = StaticPodPicklingMetadata.loads(self.ctx.reader.read_meta(PodId(self.ctx.tid, root_oid)))
 
         # Register myself into unpickler by oid.
         self.ctx.unpickler_by_oid[self.root_oid] = self
@@ -488,7 +491,7 @@ class StaticPodUnpickler(BaseUnpickler):
                 raise AttributeError(
                     "Pod under experimment expects Python-based unpickler (e.g., pickle.Unpickler = pickle._Unpickler)."
                 )
-        with self.ctx.reader.read(make_pod_id(self.ctx.tid, oid)) as obj_io:
+        with self.ctx.reader.read(PodId(self.ctx.tid, oid)) as obj_io:
             return StaticPodUnpickler(oid, self.ctx, obj_io, *self.args, **self.kwargs).load()
 
     def root_obj(self) -> Object:
@@ -509,7 +512,7 @@ class StaticPodPicklingDumpSession(PodPicklingDumpSession):
 
     def dump(self, pid: PodId, obj: Object) -> None:
         assert self.writer is not None
-        if object_id(obj) not in self.ctx.seen_oid:
+        if id(obj) not in self.ctx.seen_oid:
             StaticPodPickler.dump_and_pod_write(
                 obj,
                 pid,
@@ -547,7 +550,7 @@ class StaticPodPickling(PodPickling):
 
     def dump(self, obj: Object) -> PodId:
         tid = step_time_id()
-        pid = make_pod_id(tid, object_id(obj))
+        pid = PodId(tid, id(obj))
         with self.dump_batch({pid: obj}) as session:
             session.dump(pid, obj)
         return pid
@@ -585,13 +588,13 @@ class StaticPodPickling(PodPickling):
                         ).load()
             return {pid: ctx_by_tid[pid.tid].loaded_objs[pid.oid] for pid in pids}
 
-    def connected_pods(self, pod_ids: Set[PodId]) -> Dict[PodId, PodId]:
+    def connected_pods(self) -> Dict[PodId, PodId]:
         try:
-            return self.storage.connected_pods(pod_ids)
+            return self.storage.connected_pods()
         except NotImplementedError:
             logger.warning(f"{self.storage.__class__.__name__}::connected_pods is not implemented.")
-            common_pid = make_pod_id(-1, -1)  # Conservatively say that all pods are connected.
-            return {pid: common_pid for pid in pod_ids}
+            common_pid = PodId(-1, -1)  # Conservatively say that all pods are connected.
+            return defaultdict(default=lambda: common_pid)  # type: ignore
 
     def estimate_size(self) -> int:
         return self.storage.estimate_size()

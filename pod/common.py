@@ -19,11 +19,18 @@ class PodId:
     def __reduce__(self):
         return self.__class__, (self.tid, self.oid)
 
-    def __eq__(self, other: PodId):
-        return self.tid == other.tid and self.oid == other.oid
+    def __eq__(self, other: object):
+        return isinstance(other, PodId) and self.tid == other.tid and self.oid == other.oid
 
     def __hash__(self):
-        return hash(self.tid) + hash(self.oid)
+        # Cantor pairing function: (a + b) * (a + b + 1) / 2 + a; where a, b >= 0
+        return (self.tid + self.oid) * (self.tid + self.oid + 1) // 2 + self.tid
+        # Szudzik's function: a >= b ? a * a + a + b : a + b * b;  where a, b >= 0
+        # return (
+        #     self.tid + self.oid * self.oid
+        #     if self.tid < self.oid
+        #     else self.tid * self.tid + self.tid + self.oid
+        # )
 
     def redis_str(self) -> str:
         return str(self.tid) + "|" + str(self.oid)
@@ -52,14 +59,6 @@ def next_rank() -> Rank:
     rank = _current_rank
     _current_rank += 1
     return rank
-
-
-def object_id(obj: Object) -> ObjectId:
-    return id(obj)
-
-
-def make_pod_id(tid: TimeId, oid: ObjectId) -> PodId:
-    return PodId(tid=tid, oid=oid)
 
 
 @dataclass
