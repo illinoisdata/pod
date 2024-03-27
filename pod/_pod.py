@@ -7,11 +7,12 @@ import pod.__pickle__  # noqa, isort:skip
 
 import threading
 import time
+import zlib
 from pathlib import Path
 from typing import Dict, Optional, Set, Tuple
 
 from pod.common import Object, PodId, TimeId, step_time_id
-from pod.pickling import ManualPodding, PodPickling, SnapshotPodPickling, StaticPodPickling
+from pod.pickling import ManualPodding, PodPickling, StaticPodPickling, pickle
 from pod.stats import ExpStat
 from pod.storage import FilePodStorage
 
@@ -45,27 +46,33 @@ class ObjectStorage:
 class SnapshotObjectStorage(ObjectStorage):
     SNAPSHOT_OID = 0  # Assume no object resides at this address.
 
-    def __init__(self, pickling: PodPickling) -> None:
-        self._pickling = pickling
+    def __init__(self, root_dir: Path) -> None:
+        self._root_dir = root_dir
+        self._root_dir.mkdir(parents=True, exist_ok=True)
 
     def new(self, pod_dir: Path) -> SnapshotObjectStorage:
-        return SnapshotObjectStorage(SnapshotPodPickling(pod_dir))
+        return SnapshotObjectStorage(pod_dir)
 
     def save(self, namespace: Namespace) -> TimeId:
         tid = step_time_id()
-        pid = PodId(tid, SnapshotObjectStorage.SNAPSHOT_OID)
-        with self._pickling.dump_batch({pid: namespace}) as dump_session:
-            dump_session.dump(pid, namespace)
+        with open(self.pickle_path(tid), "wb") as f:
+            # pickle.dump(namespace, f)
+            f.write(zlib.compress(pickle.dumps(namespace)))
         return tid
 
     def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
-        namespace = self._pickling.load(PodId(tid, SnapshotObjectStorage.SNAPSHOT_OID))
+        with open(self.pickle_path(tid), "rb") as f:
+            # namespace = pickle.load(f)
+            namespace = pickle.loads(zlib.decompress(f.read()))
         if nameset is not None:
             namespace = {name: namespace[name] for name in nameset}
         return namespace
 
     def estimate_size(self) -> int:
-        return self._pickling.estimate_size()
+        return sum(f.stat().st_size for f in self._root_dir.glob("**/*") if f.is_file())
+
+    def pickle_path(self, tid: TimeId) -> Path:
+        return self._root_dir / f"{tid}.pkl"
 
 
 """ Pod namespace storage """

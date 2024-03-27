@@ -9,6 +9,7 @@ import glob
 import io
 import os
 import pickle
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Queue
@@ -286,7 +287,8 @@ class FilePodStorageWriter(PodWriter):
         # Write buffer.
         page_idx = self.storage.next_pod_page_idx()
         with open(self.storage.pod_page_path(page_idx), "wb") as f:
-            pickle.dump(pod_page_buffer, f)
+            # pickle.dumps(pod_page_buffer, f)
+            f.write(zlib.compress(pickle.dumps(pod_page_buffer)))
 
         # Update index.
         self.new_pid_index.update({pid: page_idx for pid in pod_page_buffer})
@@ -324,7 +326,8 @@ class FilePodStorageReader(PodReader):
         self.page_cache: Dict[int, FilePodStoragePodPage] = {}
         for page_idx in page_idxs:
             with open(self.storage.pod_page_path(page_idx), "rb") as f:
-                self.page_cache[page_idx] = pickle.load(f)
+                # self.page_cache[page_idx] = pickle.load(f)
+                self.page_cache[page_idx] = pickle.loads(zlib.decompress(f.read()))
                 # self.cache_stat.add_io(  # stat_cache_pfl
                 # sum(len(pod_bytes)  # stat_cache_pfl
                 # for _, pod_bytes in self.page_cache[page_idx].items()))  # stat_cache_pfl
@@ -336,7 +339,8 @@ class FilePodStorageReader(PodReader):
         if page_idx not in self.page_cache:
             logger.warning(f"Unexpected cache miss on {pod_id} (={resolved_pid}), page_idx= {page_path}")
             with open(page_path, "rb") as f:
-                self.page_cache[page_idx] = pickle.load(f)
+                # self.page_cache[page_idx] = pickle.load(f)
+                self.page_cache[page_idx] = pickle.loads(zlib.decompress(f.read()))
                 # self.cache_stat.add_io(  # stat_cache_pfl
                 # sum(len(pod_bytes)  # stat_cache_pfl
                 # for _, pod_bytes in self.page_cache[page_idx].items()))  # stat_cache_pfl

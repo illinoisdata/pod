@@ -305,9 +305,11 @@ class SUT:
 
     @staticmethod
     def sut(args: BenchArgs) -> ObjectStorage:
-        pickling = SUT.pickling(args)
         if args.sut == "snapshot":
-            return SnapshotObjectStorage(pickling)
+            assert args.pod_dir is not None, "snapshot requires --pod_dir"
+            return SnapshotObjectStorage(args.pod_dir)
+
+        pickling = SUT.pickling(args)
         if args.sut_async:
             return AsyncPodObjectStorage(pickling)
         return PodObjectStorage(pickling)

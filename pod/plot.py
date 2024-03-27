@@ -187,6 +187,7 @@ def plot_exp1batch(argv: List[str]) -> None:
             total_join_time = sum(result.join_times)
             total_dump_time = sum(stat.time_s for stat in result.dumps)
             total_times["exec"].append(total_exec_time - total_lock_time)
+            # total_times["exec"].append(0)
             total_times["lock"].append(total_lock_time)
             total_times["wait"].append(total_join_time)
             total_times["save"].append(total_dump_time - total_join_time)

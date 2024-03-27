@@ -7,6 +7,7 @@ import pod.__pickle__  # noqa, isort:skip
 
 import enum
 import io
+import zlib
 from collections import defaultdict
 from dataclasses import dataclass
 from types import CodeType, FunctionType, ModuleType
@@ -83,7 +84,8 @@ class SnapshotPodPicklingDumpSession(PodPicklingDumpSession):
 
     def dump(self, pid: PodId, obj: Object) -> None:
         with open(self.pickling.pickle_path(pid), "wb") as f:
-            pickle.dump(obj, f)
+            # pickle.dump(obj, f)
+            f.write(zlib.compress(pickle.dumps(obj)))
 
 
 class SnapshotPodPickling(PodPickling):
@@ -95,7 +97,8 @@ class SnapshotPodPickling(PodPickling):
         tid = step_time_id()
         pid = PodId(tid, id(obj))
         with open(self.pickle_path(pid), "wb") as f:
-            pickle.dump(obj, f)
+            # pickle.dump(obj, f)
+            f.write(zlib.compress(pickle.dumps(obj)))
         return pid
 
     def dump_batch(self, pods: Dict[PodId, Object]) -> PodPicklingDumpSession:
@@ -103,7 +106,8 @@ class SnapshotPodPickling(PodPickling):
 
     def load(self, pid: PodId) -> Object:
         with open(self.pickle_path(pid), "rb") as f:
-            return pickle.load(f)
+            # return pickle.load(f)
+            return pickle.loads(zlib.decompress(f.read()))
 
     def load_batch(self, pids: Set[PodId]) -> Dict[PodId, Object]:
         return {pid: self.load(pid) for pid in pids}
