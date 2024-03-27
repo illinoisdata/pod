@@ -2,7 +2,7 @@
 if [ "$#" -ne 2 ]
 then
     echo "Require 2 arguments (COMPOSE_NAME), (DATA_VOLUME) $# provided"
-    echo 'Example: bash experiments/start-all.sh pod_${USER} /data/elastic-notebook/data'
+    echo 'Example: bash experiments/start-all.sh pod_${USER} /data/elastic-notebook/'
     exit 1
 fi
 
