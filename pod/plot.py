@@ -96,6 +96,7 @@ def plot_exp1(argv: List[str]) -> None:
     ax.set_ylabel("Storage (bytes)")
 
     fig.tight_layout()
+    plt.savefig("test_plot.png")
     plt.show()
 
 
@@ -258,6 +259,154 @@ def plot_exp1batch(argv: List[str]) -> None:
     plt.show()
 
 
+def create_axis(labels, data, exp_name):
+    axis_str = (
+        r"""
+\begin{axis}[
+    height=37mm,
+    axis lines=left,
+    width="""
+        + str(len(labels) * 10)
+        + r"""mm,
+    ymode=linear,
+    ymin=0.1,
+    ymax="""
+        + str(round(max(data)) + 10)
+        + r""",
+    xmin = 0,
+    xmax = 2,
+    bar width=10pt,
+    ybar,
+    enlarge x limits=0,
+    xtick = { 1 },
+    xticklabels = { },
+    ytick = {"""
+        + ",".join([str((s)) for s in list(range(0, (round(max(data)) + 20), 10))])
+        + r"""},
+    xticklabel style = {rotate=45, anchor=east, yshift=-3mm, font=\scriptsize\sf}, % Rotate for space
+    xtick pos=left,
+    xlabel=\textsf{"""
+        + exp_name
+        + r"""},
+    xlabel shift=-4mm,
+    ylabel=\textsf{Storage (GB)},
+    ylabel near ticks,
+    ylabel style={align=center},
+    label style={font=\scriptsize\sf},
+    ylabel shift=-2mm,
+    legend style={
+        at={(0.5, 1.05)},anchor=south,column sep=2pt,
+        draw=black,fill=white,line width=.5pt,
+        font=\tiny,
+        /tikz/every even column/.append style={column sep=5pt}
+    },
+    legend columns=-1,
+    colormap name=bright,
+    every axis/.append style={font=\scriptsize},
+    ymajorgrids,
+    ylabel near ticks,
+    legend image code/.code={%
+        \draw[#1, draw=none] (0cm,-0.1cm) rectangle (0.4cm,0.1cm);
+    },
+]
+
+"""
+    )
+    return axis_str
+
+
+def create_table(labels, data, name):
+    table_head = "  ".join(labels)
+    table_vals = create_table_vals(data)
+    table_str = r"""\pgfplotstableread{"""
+    table_str += table_head + "\n"
+    table_str += (
+        table_vals
+        + r"""
+}\TBL"""
+        + f"{name}\n"
+    )
+    return table_str
+
+
+def create_table_vals(data):
+    vals = ["1"]
+    for val in data:
+        vals.append(str(val))
+    return "    ".join(vals)
+
+
+def create_plots(labels, name):
+    colors = ["blue", "red", "orange", "green", "purple", "yellow"]
+    plot_str = r""
+    for i in range(1, len(labels)):
+        plot_str += (
+            r"""\addplot plot [
+    fill="""
+            + colors[i - 1]
+            + r""",draw=none]
+table[x=idx, y="""
+            + labels[i]
+            + r"""] {\TBL"""
+            + name
+            + "};"
+        )
+        plot_str += "\n"
+    return plot_str
+
+
+def gen_storage_bar(argv: List[str]):
+    args = simple_parsing.parse(PlotExp1BatchPreArgs, args=argv).post_parse()
+    logger.info(args)
+    tex = r"""\begin{figure*}[t]
+\centering
+"""
+    tables = []
+    axes = []
+    labels: List[List] = []
+    for single in args.singles:
+        exp_labels: List[str] = []
+        dump_final_storage_gb: List[float] = []
+        logger.info("============================")
+        logger.info(f"{single.name}")
+        all_results = [
+            (f"{idx}_{result_path.parent.name}", ExpStat.load(result_path))
+            for idx, result_path in enumerate(single.result_paths)
+        ]
+        exp_labels.append("idx")
+        for expname, result in all_results:
+            exp_labels.append(expname)
+            dump_final_storage_gb.append(result.dumps[-1].storage_b / 1e9)
+        tables.append(create_table(exp_labels, dump_final_storage_gb, single.name))
+        axes.append(create_axis(exp_labels, dump_final_storage_gb, single.name))
+        labels.append(exp_labels)
+
+    tex += "\n\n".join(tables) + "\n\n"
+    subfig_header = r"""\begin{subfigure}[t]{0.1\textwidth} \centering
+\begin{tikzpicture}
+"""
+    subfig_end = r"""\end{axis}
+\end{tikzpicture}
+\end{subfigure}
+"""
+    for i, single in enumerate(args.singles):
+        plots = create_plots(labels[i], single.name)
+        tex += subfig_header
+        tex += axes[i]
+        tex += plots
+        tex += subfig_end
+        if i < len(args.singles) - 1:
+            tex += r"""\hspace{80pt}""" + "\n"
+
+    tex += r"""
+\label{fig:pod-storage}
+\vspace{-2mm}
+\end{figure*}"""
+    print(tex)
+    with open("fig.tex", "w") as tf:
+        tf.write(tex)
+
+
 if __name__ == "__main__":
     logger.info(f"Arguments {sys.argv}")
     if len(sys.argv) < 2:
@@ -268,6 +417,8 @@ if __name__ == "__main__":
         plot_exp1(sys.argv[2:])
     elif sys.argv[1] == "exp1batch":
         plot_exp1batch(sys.argv[2:])
+    elif sys.argv[1] == "texbar":
+        gen_storage_bar(sys.argv[2:])
     else:
         logger.error(f'Unknown experiment "{sys.argv[0]}"')
         sys.exit(1)
