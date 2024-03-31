@@ -170,6 +170,7 @@ class ManualPodding:
     FINAL_MODULES = {
         "sklearn",
     }
+    SPLIT_FINAL_AT_DEP = 1
 
     @staticmethod
     def podding_fn(obj: Object, pickler: BasePickler) -> PodAction:
@@ -180,7 +181,11 @@ class ManualPodding:
         obj_module = getattr(obj, "__module__", None)
         obj_module = obj_module.split(".")[0] if isinstance(obj_module, str) else None
         is_split = isinstance(obj, ManualPodding.SPLIT_TYPES) or obj_module in ManualPodding.SPLIT_MODULES
-        is_split_final = is_split and (isinstance(obj, ManualPodding.FINAL_TYPES) or obj_module in ManualPodding.FINAL_MODULES)
+        is_split_final = is_split and (
+            isinstance(obj, ManualPodding.FINAL_TYPES)
+            or obj_module in ManualPodding.FINAL_MODULES
+            or pickler.pod_depth >= ManualPodding.SPLIT_FINAL_AT_DEP
+        )
 
         # Decide whether to split.
         if is_split:

@@ -24,6 +24,7 @@ from pod.feature import __FEATURE__
 from pod.model import (
     FeatureCollectorModel,
     GreedyPoddingModel,
+    LightGBMClassifierRoC,
     NaivePoddingModel,
     RandomPoddingModel,
     RoCFeatureCollectorModel,
@@ -89,7 +90,7 @@ class BenchArgs:
     enable_feature: bool = False  # Whether to enable feature extraction
 
     # Cost model.
-    cm_pod_overhead: float = 120  # Overhead for each pod (bytes per save).
+    cm_pod_overhead: float = 1200  # Overhead for each pod (bytes per save).
     roc_path: Optional[Path] = None  # Path to rate of change model.
 
 
@@ -247,11 +248,16 @@ class SUT:
         elif args.podding_model == "naive":
             naive_model = NaivePoddingModel()
             return naive_model.podding_fn, None
-        elif args.podding_model == "greedy":
-            assert args.roc_path is not None, "greedy requires --roc_path"
-            roc_model = XGBRegressorRoC.load_from(args.roc_path)
-            g_model = GreedyPoddingModel(roc_model=roc_model, pod_overhead=args.cm_pod_overhead)
-            return g_model.podding_fn, g_model.post_podding_fn
+        elif args.podding_model == "greedy-xgb":
+            assert args.roc_path is not None, "greedy-xgb requires --roc_path"
+            roc_xgb_model = XGBRegressorRoC.load_from(args.roc_path)
+            gx_model = GreedyPoddingModel(roc_model=roc_xgb_model, pod_overhead=args.cm_pod_overhead)
+            return gx_model.podding_fn, gx_model.post_podding_fn
+        elif args.podding_model == "greedy-lgb":
+            assert args.roc_path is not None, "greedy-lgb requires --roc_path"
+            roc_lgb_model = LightGBMClassifierRoC.load_from(args.roc_path)
+            gl_model = GreedyPoddingModel(roc_model=roc_lgb_model, pod_overhead=args.cm_pod_overhead)
+            return gl_model.podding_fn, gl_model.post_podding_fn
         elif args.podding_model == "random":
             return RandomPoddingModel().podding_fn, None
         elif args.podding_model == "manual-collect":
