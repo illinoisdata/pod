@@ -19,7 +19,7 @@ NB_MAP=(
     "denoisft notebooks/fast-fourier-transform-denoising.ipynb"
     "ai4code notebooks/ai4code-detailed-eda.ipynb"
     "covid193 notebooks/cv19w3-2-v2-play-2-v3fix-sub-last6dayopt.ipynb"
-    # "twittnet notebooks/twitter_networks.ipynb"
+    "twittnet notebooks/twitter_networks.ipynb"
     "skltweet notebooks/sklearn_tweet_classification.ipynb"
     # "trainlms notebooks/04_training_linear_models.ipynb"
 
@@ -87,10 +87,10 @@ function get_sut_args() {
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --sut_async"
     elif [[ $_SUT == "pgl" ]]
     then
-        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy --roc_path models/roc_model.pkl"
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt"
     elif [[ $_SUT == "pga" ]]
     then
-        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy --roc_path models/roc_model.pkl --sut_async"
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async"
     elif [[ $_SUT == "pnv" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive"

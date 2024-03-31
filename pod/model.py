@@ -9,6 +9,7 @@ from copyreg import dispatch_table
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import lightgbm as lgb
 import pandas as pd
 from loguru import logger
 from xgboost import XGBRegressor
@@ -50,7 +51,40 @@ class XGBRegressorRoC(RateOfChangeModel):
         ]
 
         # Run through XGBRegressor.
-        return max(self._bst.predict([features])[0], 0.0)
+        return min(max(self._bst.predict([features])[0], 0.0), 1.0)
+
+    def _get_obj_len(self, obj: Object) -> Optional[int]:
+        try:
+            return obj.__len__()
+        except Exception:
+            return None
+
+    def _get_obj_len_dict(self, obj: Object) -> Optional[int]:
+        if hasattr(obj, "__dict__"):
+            return len(obj.__dict__)
+        return None
+
+
+class LightGBMClassifierRoC(RateOfChangeModel):
+    def __init__(self, bst: lgb.Booster) -> None:
+        self._bst = bst
+
+    @staticmethod
+    def load_from(path: Path) -> LightGBMClassifierRoC:
+        return LightGBMClassifierRoC(lgb.Booster(model_file=path.resolve()))
+
+    def roc(self, obj: Object, pickler: BasePickler) -> float:
+        # Extract features. Should match those in RoCFeatureCollectorModel and training script.
+        features = [
+            sys.getsizeof(obj),  # size
+            self._get_obj_len(obj),  # len
+            self._get_obj_len_dict(obj),  # len_dict
+        ]
+
+        # Run through XGBRegressor.
+        if self._bst.predict([features], num_threads=1)[0] < 0.5:
+            return 0.0
+        return 0.1
 
     def _get_obj_len(self, obj: Object) -> Optional[int]:
         try:
@@ -108,7 +142,7 @@ class GreedyPoddingModel(ConservativePoddingModel):
         NoneType,
         type,
     )
-    SPLIT_FINAL_AT_DEP = 10
+    SPLIT_FINAL_AT_DEP = 1
 
     def __init__(
         self,
@@ -155,7 +189,7 @@ class GreedyPoddingModel(ConservativePoddingModel):
         # TODO: Properly model rate of change.
         if isinstance(obj, GreedyPoddingModel.IMMUTABLE_TYPES):
             return 0.0
-        return min(max(self._roc_model.roc(obj, pickler), 0.0), 1.0)
+        return self._roc_model.roc(obj, pickler)
 
     def _get_pod_size(self, pickler: BasePickler) -> int:
         file = getattr(pickler, "file", None)
