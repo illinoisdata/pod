@@ -364,7 +364,7 @@ class StaticPodPickler(BaseStaticPodPickler):
             if __FEATURE__.is_enabled:
                 __FEATURE__.new_pod_oid(self.root_pid, id(obj))
             return None
-        if id(obj) not in self.ctx.root_oids and isinstance(obj, StaticPodPickler.MUST_BUNDLE_TYPES):
+        if isinstance(obj, StaticPodPickler.MUST_BUNDLE_TYPES):
             # Always bundle these types without checking the action cache.
             # __FEATURE__.new_pod_oid(self.root_pid, id(obj))
             return None

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import lightgbm as lgb
+import numpy as np
 import pandas as pd
 from loguru import logger
 from xgboost import XGBRegressor
@@ -68,6 +69,7 @@ class XGBRegressorRoC(RateOfChangeModel):
 class LightGBMClassifierRoC(RateOfChangeModel):
     def __init__(self, bst: lgb.Booster) -> None:
         self._bst = bst
+        self._features = np.array([[0.0, 0.0, 0.0]])
 
     @staticmethod
     def load_from(path: Path) -> LightGBMClassifierRoC:
@@ -75,18 +77,18 @@ class LightGBMClassifierRoC(RateOfChangeModel):
 
     def roc(self, obj: Object, pickler: BasePickler) -> float:
         # Extract features. Should match those in RoCFeatureCollectorModel and training script.
-        features = [
-            sys.getsizeof(obj),  # size
-            self._get_obj_len(obj),  # len
-            self._get_obj_len_dict(obj),  # len_dict
-        ]
+        self._features[0, 0] = sys.getsizeof(obj)  # size
+        self._features[0, 1] = self._get_obj_len(obj)  # len
+        self._features[0, 2] = self._get_obj_len_dict(obj)  # len_dict
 
         # Run through XGBRegressor.
-        if self._bst.predict([features], num_threads=1)[0] < 0.5:
+        if random.random() < 0.1 and self._bst.predict(self._features, num_threads=1)[0] < 0.5:
             return 0.0
         return 0.1
 
     def _get_obj_len(self, obj: Object) -> Optional[int]:
+        if not hasattr(obj, "__len__"):
+            return None
         try:
             return obj.__len__()
         except Exception:
