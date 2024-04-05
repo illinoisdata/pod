@@ -25,7 +25,7 @@ from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from pod.algo import union_find
 from pod.common import PodDependency, PodId
 
-POD_CACHE_SIZE = 2_000_000_000
+POD_CACHE_SIZE = 32_000_000_000
 
 
 def serialize_pod_id(pod_id: PodId) -> bytes:
