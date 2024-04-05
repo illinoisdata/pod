@@ -405,7 +405,7 @@ def run_exp1_impl(args: BenchArgs) -> None:
         # Load state.
         load_start_ts = time.time()
         try:
-            with BlockTimeout(60):
+            with BlockTimeout(300):
                 loaded_locals = sut.load(tid)
         except TimeoutError as e:
             logger.warning(f"{e}")
