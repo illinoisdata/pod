@@ -10,7 +10,7 @@ MemoId = int
 
 class MemoPageAllocator:
     VIRTUAL_OFFSET = 2**31  # [VIRTUAL_OFFSET, 2 ** 32) virtually points to global memo indices.
-    PAGE_SIZE = 2**10  # Number of memo objects per page.
+    PAGE_SIZE = 2**6  # Number of memo objects per page.
 
     def __init__(self) -> None:
         self.oid_pages: Dict[ObjectId, List[MemoId]] = {}
