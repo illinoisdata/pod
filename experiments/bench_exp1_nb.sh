@@ -29,5 +29,6 @@ sleep 1
 prepare_sut ${SUT}
 python pod/bench.py exp1 \
     --expname exp1_${SUT}_${NBNAME} \
+    --nbname ${NBNAME} \
     --nb ${nbpath} \
     ${sut_args}
