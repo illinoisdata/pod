@@ -366,6 +366,8 @@ def run_exp1_impl(args: BenchArgs) -> None:
         cell, the_globals, the_locals, stdout, stderr = next(nb_exec_step)
         exec_stop_ts = time.time()
 
+        logger.error(f"{nth}: {the_locals.pod_active_names()}")
+
         # Dump current state.
         # scalene_profiler.start()
         dump_start_ts = time.time()
@@ -409,31 +411,31 @@ def run_exp1_impl(args: BenchArgs) -> None:
     random.shuffle(test_tids)
     logger.info(f"Testing {len(test_tids)} loads, {test_tids}")
 
-    # Load random steps.
-    loaded_locals: Optional[Namespace] = None
-    for nth, tid in enumerate(test_tids):
-        # Load state.
-        load_start_ts = time.time()
-        try:
-            with BlockTimeout(300):
-                loaded_locals = sut.load(tid)
-        except TimeoutError as e:
-            logger.warning(f"{e}")
-        load_stop_ts = time.time()
+    # # Load random steps.
+    # loaded_locals: Optional[Namespace] = None
+    # for nth, tid in enumerate(test_tids):
+    #     # Load state.
+    #     load_start_ts = time.time()
+    #     try:
+    #         with BlockTimeout(300):
+    #             loaded_locals = sut.load(tid)
+    #     except TimeoutError as e:
+    #         logger.warning(f"{e}")
+    #     load_stop_ts = time.time()
 
-        # Record measurements.
-        expstat.add_load(
-            nth=nth,
-            tid=tid,
-            time_s=load_stop_ts - load_start_ts,
-        )
+    #     # Record measurements.
+    #     expstat.add_load(
+    #         nth=nth,
+    #         tid=tid,
+    #         time_s=load_stop_ts - load_start_ts,
+    #     )
 
-        # Reset environment to reduce noise.
-        if loaded_locals is not None:
-            del loaded_locals
-            loaded_locals = None
-        gc.collect()
-    expstat.summary()
+    #     # Reset environment to reduce noise.
+    #     if loaded_locals is not None:
+    #         del loaded_locals
+    #         loaded_locals = None
+    #     gc.collect()
+    # expstat.summary()
 
     # No more measurement, re-enable now.
     gc.enable()
