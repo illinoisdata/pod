@@ -29,6 +29,22 @@ except ImportError:
 
 
 class RateOfChangeModel:
+    IMMUTABLE_TYPES = (
+        # Primitive immutable types.
+        str,
+        bytes,
+        int,
+        float,
+        complex,
+        bool,
+        # Immutable collections.
+        tuple,
+        frozenset,
+        # Meta and singleton types.
+        NoneType,
+        type,
+    )
+
     def roc(self, obj: Object, pickler: BasePickler) -> float:
         raise NotImplementedError("Abstract method")
 
@@ -44,6 +60,9 @@ class XGBRegressorRoC(RateOfChangeModel):
         return XGBRegressorRoC(bst)
 
     def roc(self, obj: Object, pickler: BasePickler) -> float:
+        if isinstance(obj, RateOfChangeModel.IMMUTABLE_TYPES):
+            return 0.0
+
         # Extract features. Should match those in RoCFeatureCollectorModel and training script.
         features = [
             sys.getsizeof(obj),  # size
@@ -76,6 +95,9 @@ class LightGBMClassifierRoC(RateOfChangeModel):
         return LightGBMClassifierRoC(lgb.Booster(model_file=path.resolve()))
 
     def roc(self, obj: Object, pickler: BasePickler) -> float:
+        if isinstance(obj, RateOfChangeModel.IMMUTABLE_TYPES):
+            return 0.0
+
         # Extract features. Should match those in RoCFeatureCollectorModel and training script.
         self._features[0, 0] = sys.getsizeof(obj)  # size
         self._features[0, 1] = self._get_obj_len(obj)  # len
@@ -98,6 +120,14 @@ class LightGBMClassifierRoC(RateOfChangeModel):
         if hasattr(obj, "__dict__"):
             return len(obj.__dict__)
         return None
+
+
+class ConstRoCModel(RateOfChangeModel):
+    def __init__(self, roc: float) -> None:
+        self._roc = roc
+
+    def roc(self, obj: Object, pickler: BasePickler) -> float:
+        return self._roc
 
 
 """ PoddingModel """
@@ -129,21 +159,6 @@ class ConservativePoddingModel(PoddingModel):
 
 
 class GreedyPoddingModel(ConservativePoddingModel):
-    IMMUTABLE_TYPES = (
-        # Primitive immutable types.
-        str,
-        bytes,
-        int,
-        float,
-        complex,
-        bool,
-        # Immutable collections.
-        tuple,
-        frozenset,
-        # Meta and singleton types.
-        NoneType,
-        type,
-    )
     SPLIT_FINAL_AT_DEP = 1
 
     def __init__(
@@ -159,9 +174,9 @@ class GreedyPoddingModel(ConservativePoddingModel):
 
     def podding_fn_impl(self, obj: Object, pickler: BasePickler) -> PodAction:
         if pickler.root_pid not in self._pod_cr:
-            self._pod_cr[pickler.root_pid] = self._change_rate(pickler.root_obj, pickler)
+            self._pod_cr[pickler.root_pid] = self._roc_model.roc(pickler.root_obj, pickler)
         pod_cr = self._pod_cr[pickler.root_pid]
-        obj_cr = self._change_rate(obj, pickler)
+        obj_cr = self._roc_model.roc(obj, pickler)
         bundle_cr = min(pod_cr + obj_cr, 1.0)
         pod_size = self._get_pod_size(pickler)
         obj_size = sys.getsizeof(obj)
@@ -186,12 +201,6 @@ class GreedyPoddingModel(ConservativePoddingModel):
         if _post_podding_fn is not None:
             _post_podding_fn()
         self._pod_cr = {}
-
-    def _change_rate(self, obj: Object, pickler: BasePickler) -> float:
-        # TODO: Properly model rate of change.
-        if isinstance(obj, GreedyPoddingModel.IMMUTABLE_TYPES):
-            return 0.0
-        return self._roc_model.roc(obj, pickler)
 
     def _get_pod_size(self, pickler: BasePickler) -> int:
         file = getattr(pickler, "file", None)

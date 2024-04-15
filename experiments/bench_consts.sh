@@ -59,6 +59,9 @@ SUTS=(
     "pfa"
     "pgl"
     "pga"
+    "pg0"
+    "pg1"
+    "prand"
     "pnv"
     "pna"
     "ppg"
@@ -91,6 +94,15 @@ function get_sut_args() {
     elif [[ $_SUT == "pga" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async"
+    elif [[ $_SUT == "pg0" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-const --const_roc 0.0"
+    elif [[ $_SUT == "pg1" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-const --const_roc 1.0"
+    elif [[ $_SUT == "prand" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model random"
     elif [[ $_SUT == "pnv" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive"
@@ -141,6 +153,15 @@ function prepare_sut() {
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pga" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pg0" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pg1" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "prand" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pnv" ]]
