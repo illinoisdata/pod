@@ -22,6 +22,7 @@ from pod._pod import AsyncPodObjectStorage, Namespace, ObjectStorage, PodObjectS
 from pod.common import TimeId
 from pod.feature import __FEATURE__
 from pod.model import (
+    ConstRoCModel,
     FeatureCollectorModel,
     GreedyPoddingModel,
     LightGBMClassifierRoC,
@@ -88,6 +89,7 @@ class BenchArgs:
     """ Learning, model, feature """
     podding_model: str = "manual"  # Model name to use for podding function.
     enable_feature: bool = False  # Whether to enable feature extraction
+    const_roc: float = 1.0  # Constant rate of change for const model.
 
     # Cost model.
     cm_pod_overhead: float = 1200  # Overhead for each pod (bytes per save).
@@ -258,6 +260,10 @@ class SUT:
             roc_lgb_model = LightGBMClassifierRoC.load_from(args.roc_path)
             gl_model = GreedyPoddingModel(roc_model=roc_lgb_model, pod_overhead=args.cm_pod_overhead)
             return gl_model.podding_fn, gl_model.post_podding_fn
+        elif args.podding_model == "greedy-const":
+            const_roc_model = ConstRoCModel(args.const_roc)
+            gc_model = GreedyPoddingModel(roc_model=const_roc_model, pod_overhead=args.cm_pod_overhead)
+            return gc_model.podding_fn, gc_model.post_podding_fn
         elif args.podding_model == "random":
             return RandomPoddingModel().podding_fn, None
         elif args.podding_model == "manual-collect":
