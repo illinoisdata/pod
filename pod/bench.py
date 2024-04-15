@@ -20,6 +20,7 @@ from loguru import logger
 
 import pod.storage
 from pod._pod import AsyncPodObjectStorage, Namespace, ObjectStorage, PodObjectStorage, SnapshotObjectStorage
+from pod.bench_consts import PARTIAL_LOAD_NAMES
 from pod.common import TimeId
 from pod.feature import __FEATURE__
 from pod.model import (
@@ -58,6 +59,7 @@ python pod/bench.py exp1 --expname test --nb rmlist --sut pod_file --pod_dir /tm
 @dataclass
 class BenchArgs:
     expname: str  # Experiment name.
+    nbname: str  # Notebook name.
     nb: str  # String path to notebook or special notebook names.
     sut: str  # Name of the system under test.
 
@@ -66,6 +68,7 @@ class BenchArgs:
 
     """ Exp1: dumps and loads """
     exp1_num_loads_per_save: int = 4  # Number of loads to test.
+    exp1_partial_load: bool = True  # Whether to test partial loading.
 
     """ Random mutating list """
     rmlist_num_cells: int = 10  # Number of cells.
@@ -349,6 +352,14 @@ def run_exp1_impl(args: BenchArgs) -> None:
     if args.podding_model == "roc-collect":
         RoCFeatureCollectorModel.NAMESPACE = namespace
 
+    # Load variable names for partial loads.
+    if args.nbname in PARTIAL_LOAD_NAMES:
+        partial_load_names = PARTIAL_LOAD_NAMES[args.nbname]
+        logger.info(f"Using partial load names= {partial_load_names}")
+    else:
+        partial_load_names = {}
+        logger.warning(f"Missing partial load names for nbname= {args.nbname}")
+
     # Measurement tracker.
     expstat = ExpStat()
     sut.instrument(expstat)
@@ -412,11 +423,20 @@ def run_exp1_impl(args: BenchArgs) -> None:
     # Load random steps.
     loaded_locals: Optional[Namespace] = None
     for nth, tid in enumerate(test_tids):
+        # Get load variable names.
+        if args.exp1_partial_load:
+            load_set = partial_load_names.get(tid, None)
+            if load_set is None:
+                logger.warning(f"Missing partial load names for nbname= {args.nbname}, tid= {tid}")
+        else:
+            load_set = None
+
         # Load state.
         load_start_ts = time.time()
         try:
             with BlockTimeout(300):
                 loaded_locals = sut.load(tid)
+                loaded_locals = sut.load(tid, nameset=load_set)
         except TimeoutError as e:
             logger.warning(f"{e}")
         load_stop_ts = time.time()
