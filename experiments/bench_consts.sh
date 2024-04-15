@@ -59,6 +59,11 @@ SUTS=(
     "pfa"
     "pgl"
     "pga"
+    "pgcache0"
+    "pgcache1m"
+    "pgcache1g"
+    "pgcache10g"
+    "pgcache100g"
     "pgnoavf"
     "pg0"
     "pg1"
@@ -95,9 +100,24 @@ function get_sut_args() {
     elif [[ $_SUT == "pga" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async"
+    elif [[ $_SUT == "pgcache0" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 0"
+    elif [[ $_SUT == "pgcache1m" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 1000000"
+    elif [[ $_SUT == "pgcache1g" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 1000000000"
+    elif [[ $_SUT == "pgcache10g" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 10000000000"
+    elif [[ $_SUT == "pgcache100g" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 100000000000"
     elif [[ $_SUT == "pgnoavf" ]]
     then
-        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --pod_active_filter False"
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_active_filter False"
     elif [[ $_SUT == "pg0" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-const --const_roc 0.0"
@@ -157,6 +177,9 @@ function prepare_sut() {
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pga" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pgcache0" || $_SUT == "pgcache1m" || $_SUT == "pgcache1g" || $_SUT == "pgcache10g" || $_SUT == "pgcache100g" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pgnoavf" ]]

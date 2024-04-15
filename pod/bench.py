@@ -18,6 +18,7 @@ import numpy as np
 import simple_parsing
 from loguru import logger
 
+import pod.storage
 from pod._pod import AsyncPodObjectStorage, Namespace, ObjectStorage, PodObjectStorage, SnapshotObjectStorage
 from pod.common import TimeId
 from pod.feature import __FEATURE__
@@ -76,6 +77,7 @@ class BenchArgs:
     sut_async: bool = False  # Use async SUT.
     pod_dir: Optional[Path] = None  # Path to pod storage root directory.
     pod_active_filter: bool = True  # Whether to filter active variables for saving.
+    pod_cache_size: int = 32_000_000_000  # Pod thesaurus capacity.
     psql_hostname: str = "localhost"  # Hostname where PostgreSQL server is running.
     psql_port: int = 5432  # Port on the hostname where PostgreSQL server is running.
     redis_hostname: str = "localhost"  # Hostname where Redis server is running.
@@ -318,6 +320,7 @@ class SUT:
 
     @staticmethod
     def sut(args: BenchArgs) -> ObjectStorage:
+        pod.storage.POD_CACHE_SIZE = args.pod_cache_size
         pickling = SUT.pickling(args)
         if args.sut == "snapshot":
             return SnapshotObjectStorage(pickling)
