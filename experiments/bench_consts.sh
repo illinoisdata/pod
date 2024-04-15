@@ -59,6 +59,7 @@ SUTS=(
     "pfa"
     "pgl"
     "pga"
+    "pgnoavf"
     "pg0"
     "pg1"
     "prand"
@@ -94,6 +95,9 @@ function get_sut_args() {
     elif [[ $_SUT == "pga" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async"
+    elif [[ $_SUT == "pgnoavf" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --pod_active_filter False"
     elif [[ $_SUT == "pg0" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-const --const_roc 0.0"
@@ -153,6 +157,9 @@ function prepare_sut() {
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pga" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pgnoavf" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pg0" ]]
