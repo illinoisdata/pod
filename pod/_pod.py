@@ -109,8 +109,9 @@ class PodNamespace(dict):
 class PodObjectStorage(ObjectStorage):
     NAMEMAP_OID = 0  # Assume no object resides at this address.
 
-    def __init__(self, pickling: PodPickling) -> None:
+    def __init__(self, pickling: PodPickling, active_filter: bool = True) -> None:
         self._pickling = pickling
+        self._active_filter = active_filter
 
     @staticmethod
     def new(pod_dir: Path) -> PodObjectStorage:
@@ -147,7 +148,7 @@ class PodObjectStorage(ObjectStorage):
     def _save_as_namemap(self, tid: TimeId, namespace: Namespace) -> Tuple[PodId, Namemap]:
         namemap_pid = PodId(tid, PodObjectStorage.NAMEMAP_OID)
 
-        if isinstance(namespace, PodNamespace):
+        if self._active_filter and isinstance(namespace, PodNamespace):
             active_names = self._connected_active_names(tid, namespace)
             prev_namemap = namespace.pod_namemap()
             active_namemap = {
@@ -317,8 +318,8 @@ class AsyncPodSaveThread(threading.Thread):
 class AsyncPodObjectStorage(PodObjectStorage):
     NAMEMAP_OID = 0  # Assume no object resides at this address.
 
-    def __init__(self, pickling: PodPickling) -> None:
-        PodObjectStorage.__init__(self, pickling)
+    def __init__(self, pickling: PodPickling, active_filter: bool = True) -> None:
+        PodObjectStorage.__init__(self, pickling, active_filter)
         self._running_save: Optional[threading.Thread] = None
 
         self._expstat: Optional[ExpStat] = None

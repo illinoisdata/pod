@@ -75,6 +75,7 @@ class BenchArgs:
     """ Pod storage """
     sut_async: bool = False  # Use async SUT.
     pod_dir: Optional[Path] = None  # Path to pod storage root directory.
+    pod_active_filter: bool = True  # Whether to filter active variables for saving.
     psql_hostname: str = "localhost"  # Hostname where PostgreSQL server is running.
     psql_port: int = 5432  # Port on the hostname where PostgreSQL server is running.
     redis_hostname: str = "localhost"  # Hostname where Redis server is running.
@@ -321,8 +322,8 @@ class SUT:
         if args.sut == "snapshot":
             return SnapshotObjectStorage(pickling)
         if args.sut_async:
-            return AsyncPodObjectStorage(pickling)
-        return PodObjectStorage(pickling)
+            return AsyncPodObjectStorage(pickling, args.pod_active_filter)
+        return PodObjectStorage(pickling, args.pod_active_filter)
 
 
 """ Main procedures """
