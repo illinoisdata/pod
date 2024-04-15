@@ -464,6 +464,8 @@ def run_exp1_impl(args: BenchArgs) -> None:
         cell, the_globals, stdout, stderr = next(nb_exec_step)
         exec_stop_ts = time.time()
 
+        logger.error(f"{nth}: {the_globals.pod_active_names()}")
+
         # Dump current state.
         # scalene_profiler.start()
         dump_start_ts = time.time()
@@ -511,50 +513,50 @@ def run_exp1_impl(args: BenchArgs) -> None:
     random.shuffle(test_tids)
     logger.info(f"Testing {len(test_tids)} loads, {test_tids}")
 
-    # Load random steps.
-    loaded_globals: Optional[Namespace] = None
-    for nth, tid in enumerate(test_tids):
-        # Get load variable names.
-        if args.exp1_partial_load:
-            load_set = partial_load_names.get(tid, None)
-            if load_set is None:
-                logger.warning(f"Missing partial load names for nbname= {args.nbname}, tid= {tid}")
-        else:
-            load_set = None
+    # # Load random steps.
+    # loaded_globals: Optional[Namespace] = None
+    # for nth, tid in enumerate(test_tids):
+    #     # Get load variable names.
+    #     if args.exp1_partial_load:
+    #         load_set = partial_load_names.get(tid, None)
+    #         if load_set is None:
+    #             logger.warning(f"Missing partial load names for nbname= {args.nbname}, tid= {tid}")
+    #     else:
+    #         load_set = None
 
-        # Load state.
-        load_start_ts = time.time()
-        try:
-            with BlockTimeout(600):
-                loaded_globals = sut.load(tid, nameset=load_set)
-        except TimeoutError as e:
-            logger.warning(f"{e}")
-        load_stop_ts = time.time()
+    #     # Load state.
+    #     load_start_ts = time.time()
+    #     try:
+    #         with BlockTimeout(600):
+    #             loaded_globals = sut.load(tid, nameset=load_set)
+    #     except TimeoutError as e:
+    #         logger.warning(f"{e}")
+    #     load_stop_ts = time.time()
 
-        # Share reference test.
-        # loaded_globals["a"].append("NEW")
-        # print(loaded_globals["a"], loaded_globals["b1"], loaded_globals["b2"])
+    #     # Share reference test.
+    #     # loaded_globals["a"].append("NEW")
+    #     # print(loaded_globals["a"], loaded_globals["b1"], loaded_globals["b2"])
 
-        try:
-            loaded_size_b = len(pickle.dumps(loaded_globals))
-        except Exception:
-            loaded_size_b = 0
+    #     try:
+    #         loaded_size_b = len(pickle.dumps(loaded_globals))
+    #     except Exception:
+    #         loaded_size_b = 0
 
-        # Record measurements.
-        expstat.add_load(
-            nth=nth,
-            tid=tid,
-            time_s=load_stop_ts - load_start_ts,
-            load_b=loaded_size_b,
-        )
+    #     # Record measurements.
+    #     expstat.add_load(
+    #         nth=nth,
+    #         tid=tid,
+    #         time_s=load_stop_ts - load_start_ts,
+    #         load_b=loaded_size_b,
+    #     )
 
-        # Reset environment to reduce noise.
-        if loaded_globals is not None:
-            del loaded_globals
-            loaded_globals = None
-        gc.collect()
-        time.sleep(1.0)
-    expstat.summary()
+    #     # Reset environment to reduce noise.
+    #     if loaded_globals is not None:
+    #         del loaded_globals
+    #         loaded_globals = None
+    #     gc.collect()
+    #     time.sleep(1.0)
+    # expstat.summary()
 
     # No more measurement, re-enable now.
     gc.enable()

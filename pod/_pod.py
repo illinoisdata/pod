@@ -541,10 +541,10 @@ class PodObjectStorage(ObjectStorage):
     def save(self, namespace: Namespace) -> TimeId:
         tid = step_time_id()
         namemap_pid, namemap = self._save_as_namemap(tid, namespace)
-        self._save_objects(tid, namespace, namemap_pid, namemap)
+        # self._save_objects(tid, namespace, namemap_pid, namemap)
         if isinstance(namespace, PodNamespace):
             namespace.pod_reset_namemap(namemap)
-        return namemap_pid.tid
+        return tid
 
     def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
         namemap = self._load_namemap(tid)
