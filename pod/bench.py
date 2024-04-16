@@ -70,7 +70,7 @@ class BenchArgs:
     """ Exp1: dumps and loads """
     exp1_num_loads_per_save: int = 4  # Number of loads to test.
     exp1_partial_load: bool = True  # Whether to test partial loading.
-    auto_static_checker: str = "always"  # Code check and automatically declare static cells.
+    auto_static_checker: str = "allowlist"  # Code check and automatically declare static cells.
 
     """ Random mutating list """
     rmlist_num_cells: int = 10  # Number of cells.
@@ -228,9 +228,15 @@ class NotebookExecutor:
     def iter(self) -> Generator[Tuple[NotebookCell, dict, str, str], None, None]:
         for cell in self.cells.iter():
             is_static = self.checker.is_static(cell, self.the_globals)
+
             if is_static and isinstance(self.the_globals, PodNamespace):
                 logger.info(f"Found static cell\n{cell}")
                 self.the_globals.set_managed(False)
+                with open("staticlines.txt", "a") as ns:
+                    ns.write(cell + "\n\n_______________\n\n")
+            else:
+                with open("nonstatic.txt", "a") as ns:
+                    ns.write(cell + "\n\n_______________\n\n")
             stdout, stderr = "", ""
             try:
                 with contextlib.redirect_stdout(io.StringIO()) as stdout_f, contextlib.redirect_stderr(
@@ -434,44 +440,44 @@ def run_exp1_impl(args: BenchArgs) -> None:
     result_path = expstat.save(args.result_dir / args.expname / "expstat.json")
     logger.info(f"Saved ExpStat (dump only) to {result_path}")
 
-    # Test equal number of loads per time ID.
-    test_tids = tids * args.exp1_num_loads_per_save
-    random.shuffle(test_tids)
-    logger.info(f"Testing {len(test_tids)} loads, {test_tids}")
+    # # Test equal number of loads per time ID.
+    # test_tids = tids * args.exp1_num_loads_per_save
+    # random.shuffle(test_tids)
+    # logger.info(f"Testing {len(test_tids)} loads, {test_tids}")
 
-    # Load random steps.
-    loaded_globals: Optional[Namespace] = None
-    for nth, tid in enumerate(test_tids):
-        # Get load variable names.
-        if args.exp1_partial_load:
-            load_set = partial_load_names.get(tid, None)
-            if load_set is None:
-                logger.warning(f"Missing partial load names for nbname= {args.nbname}, tid= {tid}")
-        else:
-            load_set = None
+    # # Load random steps.
+    # loaded_globals: Optional[Namespace] = None
+    # for nth, tid in enumerate(test_tids):
+    #     # Get load variable names.
+    #     if args.exp1_partial_load:
+    #         load_set = partial_load_names.get(tid, None)
+    #         if load_set is None:
+    #             logger.warning(f"Missing partial load names for nbname= {args.nbname}, tid= {tid}")
+    #     else:
+    #         load_set = None
 
-        # Load state.
-        load_start_ts = time.time()
-        try:
-            with BlockTimeout(300):
-                loaded_globals = sut.load(tid)
-                loaded_globals = sut.load(tid, nameset=load_set)
-        except TimeoutError as e:
-            logger.warning(f"{e}")
-        load_stop_ts = time.time()
+    #     # Load state.
+    #     load_start_ts = time.time()
+    #     try:
+    #         with BlockTimeout(300):
+    #             loaded_globals = sut.load(tid)
+    #             loaded_globals = sut.load(tid, nameset=load_set)
+    #     except TimeoutError as e:
+    #         logger.warning(f"{e}")
+    #     load_stop_ts = time.time()
 
-        # Record measurements.
-        expstat.add_load(
-            nth=nth,
-            tid=tid,
-            time_s=load_stop_ts - load_start_ts,
-        )
+    #     # Record measurements.
+    #     expstat.add_load(
+    #         nth=nth,
+    #         tid=tid,
+    #         time_s=load_stop_ts - load_start_ts,
+    #     )
 
-        # Reset environment to reduce noise.
-        if loaded_globals is not None:
-            del loaded_globals
-            loaded_globals = None
-        gc.collect()
+    #     # Reset environment to reduce noise.
+    #     if loaded_globals is not None:
+    #         del loaded_globals
+    #         loaded_globals = None
+    #     gc.collect()
     expstat.summary()
 
     # No more measurement, re-enable now.
