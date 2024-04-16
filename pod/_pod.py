@@ -77,22 +77,30 @@ class PodNamespace(dict):
         dict.__init__(self, *args, **kwargs)
         self.active_names: Set[str] = set(self.keys())
         self.namemap: Namemap = {}
+        self.managed: bool = True
 
     def __getitem__(self, name: str) -> Object:
-        self.active_names.add(name)
+        if self.managed:
+            self.active_names.add(name)
         return dict.__getitem__(self, name)
 
     def __setitem__(self, name: str, obj: Object) -> None:
-        self.active_names.add(name)
+        if self.managed:
+            self.active_names.add(name)
         return dict.__setitem__(self, name, obj)
 
     def __delitem__(self, name: str):
-        self.active_names.discard(name)
+        if self.managed:
+            self.active_names.discard(name)
         return dict.__delitem__(self, name)
 
     def items(self):
-        self.active_names = set(self.keys())  # TODO: Use enum for this.
+        if self.managed:
+            self.active_names = set(self.keys())  # TODO: Use enum for this.
         return dict.items(self)
+
+    def set_managed(self, managed: bool):
+        self.managed = managed
 
     def pod_active_names(self) -> Set[str]:
         return self.active_names
@@ -226,25 +234,25 @@ class AsyncPodNamespace(PodNamespace):
         self._saving_threads: Set[int] = set()
 
     def __getitem__(self, name: str) -> Object:
-        if threading.get_ident() in self._saving_threads:  # Skip activating name for saving tread.
+        if threading.get_ident() in self._saving_threads or not self.managed:  # Skip activating name for saving tread.
             return dict.__getitem__(self, name)
         with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
             return PodNamespace.__getitem__(self, name)
 
     def __setitem__(self, name: str, obj: Object) -> None:
-        if threading.get_ident() in self._saving_threads:
+        if threading.get_ident() in self._saving_threads or not self.managed:
             return dict.__setitem__(self, name, obj)
         with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
             return PodNamespace.__setitem__(self, name, obj)
 
     def __delitem__(self, name: str):
-        if threading.get_ident() in self._saving_threads:
+        if threading.get_ident() in self._saving_threads or not self.managed:
             return dict.__delitem__(self, name)
         with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
             return PodNamespace.__delitem__(self, name)
 
     def items(self):
-        if threading.get_ident() in self._saving_threads:
+        if threading.get_ident() in self._saving_threads or not self.managed:
             return dict.items(self)
         with LockIf(self._namespace_lock, len(self._locked_names) > 0, self._pod_storage._expstat):
             return PodNamespace.items(self)

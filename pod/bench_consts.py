@@ -1,7 +1,9 @@
+from typing import Dict, Set
+
 """ Accessed variables for partial loading. """
 
 # Extracted from supawit/loadnames.
-PARTIAL_LOAD_NAMES = {
+PARTIAL_LOAD_NAMES: Dict[str, Dict[int, Set[str]]] = {
     "rmlist": {
         0: {"f", "l", "h", "random", "secrets", "l2", "lc", "l_share", "range", "__builtins__", "__spec__"},
         1: {"len", "idx", "l", "random", "secrets", "range"},
