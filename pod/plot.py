@@ -11,8 +11,8 @@ import numpy as np
 import simple_parsing
 from loguru import logger
 
-from pod.stats import ExpStat
 from pod.plot_macros import *
+from pod.stats import ExpStat
 
 """
 Example:
@@ -27,6 +27,7 @@ END_BAR_TEX = r"""
 \label{fig:pod-storage}
 \vspace{-2mm}
 \end{figure*}"""
+
 
 def set_fontsize(
     ax: matplotlib.axes.Axes,
@@ -262,7 +263,6 @@ def plot_exp1batch(argv: List[str]) -> None:
     plt.show()
 
 
-
 def create_table(labels, data, name):
     table_head = "  ".join(labels)
     table_vals = create_table_vals(data)
@@ -275,7 +275,6 @@ def create_table(labels, data, name):
         + f"{name}\n"
     )
     return table_str
-
 
 
 def gen_storage_bar(argv: List[str]):
@@ -313,11 +312,15 @@ def gen_storage_bar(argv: List[str]):
         tex += axes[i]
         tex += plots
         # tex += r"""\caption{ """+ single.name + r" }" + "\n"
-        tex +=  r"""\end{axis}
+        tex += (
+            r"""\end{axis}
 \end{tikzpicture}
-\caption{""" + single.name + r"""}
+\caption{"""
+            + single.name
+            + r"""}
 \end{subfigure}
 """
+        )
         if i < len(args.singles) - 1:
             tex += r"""\hspace{80pt}""" + "\n"
 
@@ -325,6 +328,7 @@ def gen_storage_bar(argv: List[str]):
     # print(tex)
     with open("storagebar.tex", "w") as tf:
         tf.write(tex)
+
 
 def gen_time_bar(argv: List[str]):
     """
@@ -378,11 +382,15 @@ def gen_time_bar(argv: List[str]):
         tex += SUBFIG_HEADER
         tex += axes[i]
         tex += create_stacked_bar_plots(single.name)
-        tex +=  r"""\end{axis}
+        tex += (
+            r"""\end{axis}
 \end{tikzpicture}
-\caption{""" + single.name + r"""}
+\caption{"""
+            + single.name
+            + r"""}
 \end{subfigure}
 """
+        )
     tex += END_BAR_TEX
     # print(tex)
     with open("timebd.tex", "w") as tbf:
@@ -397,7 +405,7 @@ def gen_load_time_line(argv: List[str]):
     axes = []
     labels: List[List] = []
     plots = []
-    
+
     suts = set()
     for single in args.singles:
         logger.info("============================")
@@ -431,7 +439,7 @@ def gen_load_time_line(argv: List[str]):
         for sut, stats in sut_load_time.items():
             sut_avg_time[sut] = []
             for tid, times in stats.items():
-                avg_time = sum(times)/len(times)
+                avg_time = sum(times) / len(times)
                 sut_avg_time[sut].append((tid, avg_time))
             sut_avg_time[sut].sort()
         tables, names = create_line_table(sut_avg_time, single.name)
@@ -440,43 +448,33 @@ def gen_load_time_line(argv: List[str]):
         axis = create_line_axis(sut_avg_time)
         axes.append(axis)
         plots.append(cur_plots)
-    
+
     fig += get_legend(list(suts))
     for i, single in enumerate(args.singles):
         fig += SUBFIG_HEADER + "\n"
         fig += axes[i] + "\n"
         fig += plots[i] + "\n"
-        fig +=  r"""\end{axis}
+        fig += (
+            r"""\end{axis}
 \end{tikzpicture}
-\caption{""" + single.name + r"""}
+\caption{"""
+            + single.name
+            + r"""}
 \end{subfigure}
 """
+        )
         if i < len(args.singles) - 1:
             fig += r"""\hspace{150pt}""" + "\n"
-    
+
     fig += END_BAR_TEX
     with open("load_time.tex", "w") as lf:
         lf.write(fig)
 
-                
 
 """export output=log_yj_new.txt; echo "@@@@@@@@@@@@" >> $output; (docker compose -f experiments/docker-compose.yml -p pod_sumayst2 exec podnogil bash experiments/bench_exp1.sh pna ai4code) 2>& 1 | tee -a $output; unset output;
 
 python pod/plot.py texfigs --batch_args ai4code:result/exp1_pfa_ai4code/expstat.json,result/exp1_pga_ai4code/expstat.json,result/exp1_snp_ai4code/expstat.json covid193:result/exp1_pfa_covid193/expstat.json,result/exp1_pga_covid193/expstat.json,result/exp1_snp_covid193/expstat.json denoisdw:result/exp1_pfa_denoisdw/expstat.json,result/exp1_pga_denoisdw/expstat.json,result/exp1_snp_denoisdw/expstat.json,result/exp1_pnv_denoisdw/expstat.json skltweet:result/exp1_pfa_skltweet/expstat.json,result/exp1_pga_skltweet/expstat.json,result/exp1_snp_skltweet/expstat.json,result/exp1_pnv_skltweet/expstat.json twittnet:result/exp1_pfa_twittnet/expstat.json,result/exp1_pga_twittnet/expstat.json,result/exp1_snp_twittnet/expstat.json,result/exp1_pnv_twittnet/expstat.json
 """
-
-
-
-    
-
-
-
-
-
-
-        
-
-
 
 
 if __name__ == "__main__":
