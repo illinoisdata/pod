@@ -11,6 +11,7 @@ import numpy as np
 import simple_parsing
 from loguru import logger
 
+from pod.plot_macros import *
 from pod.stats import ExpStat
 
 """
@@ -22,6 +23,10 @@ python pod/plot.py exp1batch --batch_args \
     rmlist:result/exp1_snp_itsttime,result/exp1_imm_rmlist,result/exp1_pfl_rmlist \
     storesfg:result/exp1_snp_storesfg
 """
+END_BAR_TEX = r"""
+\label{fig:pod-storage}
+\vspace{-2mm}
+\end{figure*}"""
 
 
 def set_fontsize(
@@ -139,7 +144,6 @@ def plot_exp1batch(argv: List[str]) -> None:
     # Plot exp1 (dump latency + storage + load latency).
     N, M, R, SZ, FS, SFS = 5, len(args.singles), 2.5, 0.8, 7, 5
     fig, axes = plt.subplots(nrows=N, ncols=M, figsize=(SZ * R * M, SZ * N))
-
     for single, axs in zip(args.singles, axes.T):
         assert len(axs) == N
         logger.info("============================")
@@ -255,7 +259,222 @@ def plot_exp1batch(argv: List[str]) -> None:
         set_fontsize(ax, FS, SFS)
 
     fig.tight_layout()
+    plt.savefig("test_plot.png")
     plt.show()
+
+
+def create_table(labels, data, name):
+    table_head = "  ".join(labels)
+    table_vals = create_table_vals(data)
+    table_str = r"""\pgfplotstableread{"""
+    table_str += table_head + "\n"
+    table_str += (
+        table_vals
+        + r"""
+}\TBL"""
+        + f"{name}\n"
+    )
+    return table_str
+
+
+def gen_storage_bar(argv: List[str]):
+    args = simple_parsing.parse(PlotExp1BatchPreArgs, args=argv).post_parse()
+    logger.info(args)
+    tex = get_header(len(args.singles), 0.35)
+    tables = []
+    axes = []
+    labels: List[List] = []
+    suts = set()
+    for single in args.singles:
+        exp_labels: List[str] = []
+        dump_final_storage_gb: List[float] = []
+        logger.info("============================")
+        logger.info(f"{single.name}")
+        all_results = [
+            (f"{idx}_{result_path.parent.name}", ExpStat.load(result_path))
+            for idx, result_path in enumerate(single.result_paths)
+        ]
+        exp_labels.append("idx")
+        for expname, result in all_results:
+            exp_labels.append(expname)
+            suts.add(expname.split("_")[2])
+            dump_final_storage_gb.append(result.dumps[-1].storage_b / 1e9)
+        tables.append(create_table(exp_labels, dump_final_storage_gb, single.name))
+        axes.append(create_bar_axis(exp_labels, dump_final_storage_gb))
+        labels.append(exp_labels)
+
+    tex += "\n\n".join(tables) + "\n\n"
+    tex += BAR_STYLE + "\n\n"
+    tex += get_legend(list(suts))
+    for i, single in enumerate(args.singles):
+        plots = create_bar_plots(labels[i], single.name)
+        tex += SUBFIG_HEADER
+        tex += axes[i]
+        tex += plots
+        # tex += r"""\caption{ """+ single.name + r" }" + "\n"
+        tex += (
+            r"""\end{axis}
+\end{tikzpicture}
+\caption{"""
+            + single.name
+            + r"""}
+\end{subfigure}
+"""
+        )
+        if i < len(args.singles) - 1:
+            tex += r"""\hspace{80pt}""" + "\n"
+
+    tex += END_BAR_TEX
+    # print(tex)
+    with open("storagebar.tex", "w") as tf:
+        tf.write(tex)
+
+
+def gen_time_bar(argv: List[str]):
+    """
+    all {category} time in one table
+    """
+    args = simple_parsing.parse(PlotExp1BatchPreArgs, args=argv).post_parse()
+    lock_times = []
+    save_times = []
+    axes = []
+    labels: List[List] = []
+    tex = get_header(len(args.singles), 0.5)
+    for single in args.singles:
+        exp_labels: List[str] = []
+        exp_lock_times = []
+        exp_save_times = []
+        logger.info(f"{single.name}")
+        all_results = [
+            (f"{idx}_{result_path.parent.name}", ExpStat.load(result_path))
+            for idx, result_path in enumerate(single.result_paths)
+        ]
+
+        for expname, result in all_results:
+            exp_labels.append(expname)
+            total_lock_time = sum(result.lock_times)
+            total_join_time = sum(result.join_times)
+            total_dump_time = sum(stat.time_s for stat in result.dumps)
+            # exp_exec_times.append(total_exec_time - total_lock_time)
+            exp_lock_times.append(total_lock_time)
+            # exp_wait_times.append(total_join_time)
+            exp_save_times.append((total_dump_time - total_join_time) + total_join_time)
+        labels.append(exp_labels)
+
+        # exec_times.append(exp_exec_times)
+        lock_times.append(exp_lock_times)
+        # wait_times.append(exp_wait_times)
+        save_times.append(exp_save_times)
+
+        # exec_table = create_time_table(exp_exec_times, single.name + "Exec")
+        lock_table = create_time_table(exp_lock_times, single.name + "Lock")
+        # wait_table = create_time_table(exp_wait_times, single.name + "Wait")
+        save_table = create_time_table(exp_save_times, single.name + "Save")
+
+        tex += lock_table + "\n\n"
+        tex += save_table + "\n\n"
+
+        axes.append(create_stacked_bar_axis(exp_lock_times, exp_save_times, exp_labels))
+
+    tex += STACKED_BAR_STYLE
+    tex += get_legend(["lock", "save"])
+    for i, single in enumerate(args.singles):
+        tex += SUBFIG_HEADER
+        tex += axes[i]
+        tex += create_stacked_bar_plots(single.name)
+        tex += (
+            r"""\end{axis}
+\end{tikzpicture}
+\caption{"""
+            + single.name
+            + r"""}
+\end{subfigure}
+"""
+        )
+    tex += END_BAR_TEX
+    # print(tex)
+    with open("timebd.tex", "w") as tbf:
+        tbf.write(tex)
+
+
+def gen_load_time_line(argv: List[str]):
+    args = simple_parsing.parse(PlotExp1BatchPreArgs, args=argv).post_parse()
+    logger.info(args)
+
+    fig = get_header(3, 0)
+    axes = []
+    labels: List[List] = []
+    plots = []
+
+    suts = set()
+    for single in args.singles:
+        logger.info("============================")
+        logger.info(f"{single.name}")
+
+        # Read all results.
+        all_results = [
+            (f"{idx}_{result_path.parent.name}", ExpStat.load(result_path))
+            for idx, result_path in enumerate(single.result_paths)
+        ]
+
+        sut_load_time = {}
+        labels: List[str] = []
+
+        # load_times: List[List[float]] = []
+
+        for expname, result in all_results:
+            logger.info(f"{expname}")
+            labels.append(expname)
+            sut = expname.split("_")[2]
+            suts.add(sut)
+            if sut not in sut_load_time:
+                sut_load_time[sut] = {}
+            sut_time = sut_load_time[sut]
+            for s in result.loads:
+                if s.tid not in sut_time:
+                    sut_time[s.tid] = []
+                sut_time[s.tid].append(s.time_s)
+        # logger.info(sut_load_time)
+        sut_avg_time = {}
+        for sut, stats in sut_load_time.items():
+            sut_avg_time[sut] = []
+            for tid, times in stats.items():
+                avg_time = sum(times) / len(times)
+                sut_avg_time[sut].append((tid, avg_time))
+            sut_avg_time[sut].sort()
+        tables, names = create_line_table(sut_avg_time, single.name)
+        fig += tables + "\n"
+        cur_plots = create_line_plots(names)
+        axis = create_line_axis(sut_avg_time)
+        axes.append(axis)
+        plots.append(cur_plots)
+
+    fig += get_legend(list(suts))
+    for i, single in enumerate(args.singles):
+        fig += SUBFIG_HEADER + "\n"
+        fig += axes[i] + "\n"
+        fig += plots[i] + "\n"
+        fig += (
+            r"""\end{axis}
+\end{tikzpicture}
+\caption{"""
+            + single.name
+            + r"""}
+\end{subfigure}
+"""
+        )
+        if i < len(args.singles) - 1:
+            fig += r"""\hspace{150pt}""" + "\n"
+
+    fig += END_BAR_TEX
+    with open("load_time.tex", "w") as lf:
+        lf.write(fig)
+
+
+"""export output=log_yj_new.txt; echo "@@@@@@@@@@@@" >> $output; (docker compose -f experiments/docker-compose.yml -p pod_sumayst2 exec podnogil bash experiments/bench_exp1.sh pna ai4code) 2>& 1 | tee -a $output; unset output;
+
+python pod/plot.py texfigs --batch_args ai4code:result/exp1_pfa_ai4code/expstat.json,result/exp1_pga_ai4code/expstat.json,result/exp1_snp_ai4code/expstat.json covid193:result/exp1_pfa_covid193/expstat.json,result/exp1_pga_covid193/expstat.json,result/exp1_snp_covid193/expstat.json denoisdw:result/exp1_pfa_denoisdw/expstat.json,result/exp1_pga_denoisdw/expstat.json,result/exp1_snp_denoisdw/expstat.json,result/exp1_pnv_denoisdw/expstat.json skltweet:result/exp1_pfa_skltweet/expstat.json,result/exp1_pga_skltweet/expstat.json,result/exp1_snp_skltweet/expstat.json,result/exp1_pnv_skltweet/expstat.json twittnet:result/exp1_pfa_twittnet/expstat.json,result/exp1_pga_twittnet/expstat.json,result/exp1_snp_twittnet/expstat.json,result/exp1_pnv_twittnet/expstat.json
+"""
 
 
 if __name__ == "__main__":
@@ -266,8 +485,16 @@ if __name__ == "__main__":
 
     if sys.argv[1] == "exp1":
         plot_exp1(sys.argv[2:])
+    elif sys.argv[1] == "texfigs":
+        gen_load_time_line(sys.argv[2:])
+        gen_storage_bar(sys.argv[2:])
+        gen_time_bar(sys.argv[2:])
     elif sys.argv[1] == "exp1batch":
         plot_exp1batch(sys.argv[2:])
+    elif sys.argv[1] == "texbar":
+        gen_storage_bar(sys.argv[2:])
+    elif sys.argv[1] == "timebar":
+        gen_time_bar(sys.argv[2:])
     else:
         logger.error(f'Unknown experiment "{sys.argv[0]}"')
         sys.exit(1)
