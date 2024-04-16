@@ -70,7 +70,7 @@ class BenchArgs:
     """ Exp1: dumps and loads """
     exp1_num_loads_per_save: int = 4  # Number of loads to test.
     exp1_partial_load: bool = True  # Whether to test partial loading.
-    auto_static_checker: str = "always"  # Code check and automatically declare static cells.
+    auto_static_checker: str = "allowlist"  # Code check and automatically declare static cells.
 
     """ Random mutating list """
     rmlist_num_cells: int = 10  # Number of cells.
@@ -228,9 +228,15 @@ class NotebookExecutor:
     def iter(self) -> Generator[Tuple[NotebookCell, dict, str, str], None, None]:
         for cell in self.cells.iter():
             is_static = self.checker.is_static(cell, self.the_globals)
+
             if is_static and isinstance(self.the_globals, PodNamespace):
-                logger.info(f"Found static cell\n{cell}")
+                # logger.info(f"Found static cell\n{cell}")
                 self.the_globals.set_managed(False)
+            #     with open("staticlines.txt", "a") as ns:
+            #         ns.write(cell + "\n\n_______________\n\n")
+            # else:
+            #     with open("nonstatic.txt", "a") as ns:
+            #         ns.write(cell + "\n\n_______________\n\n")
             stdout, stderr = "", ""
             try:
                 with contextlib.redirect_stdout(io.StringIO()) as stdout_f, contextlib.redirect_stderr(
