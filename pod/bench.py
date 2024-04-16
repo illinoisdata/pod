@@ -19,7 +19,7 @@ import simple_parsing
 from loguru import logger
 
 import pod.storage
-from pod._pod import AsyncPodObjectStorage, Namespace, ObjectStorage, PodObjectStorage, SnapshotObjectStorage
+from pod._pod import AsyncPodObjectStorage, Namespace, ObjectStorage, PodNamespace, PodObjectStorage, SnapshotObjectStorage
 from pod.bench_consts import PARTIAL_LOAD_NAMES
 from pod.common import TimeId
 from pod.feature import __FEATURE__
@@ -41,6 +41,7 @@ from pod.pickling import (
     SnapshotPodPickling,
     StaticPodPickling,
 )
+from pod.static import AllowlistStaticCodeChecker, AlwaysNonStaticCodeChecker, StaticCodeChecker
 from pod.stats import ExpStat
 from pod.storage import DictPodStorage, FilePodStorage, MongoPodStorage, Neo4jPodStorage, PostgreSQLPodStorage, RedisPodStorage
 
@@ -69,6 +70,7 @@ class BenchArgs:
     """ Exp1: dumps and loads """
     exp1_num_loads_per_save: int = 4  # Number of loads to test.
     exp1_partial_load: bool = True  # Whether to test partial loading.
+    auto_static_checker: str = "always"  # Code check and automatically declare static cells.
 
     """ Random mutating list """
     rmlist_num_cells: int = 10  # Number of cells.
@@ -202,31 +204,47 @@ class Notebooks:
             return FileNotebookCells(notebook_path)
 
 
+class CodeCheckers:
+    @staticmethod
+    def checker(args: BenchArgs) -> StaticCodeChecker:
+        if args.auto_static_checker == "always":
+            return AlwaysNonStaticCodeChecker()
+        elif args.auto_static_checker == "allowlist":
+            return AllowlistStaticCodeChecker()
+        raise ValueError(f'Invalid code checker name "{args.auto_static_checker}"')
+
+
 class NotebookExecutor:
-    def __init__(self, cells: NotebookCells, the_locals: dict = {}) -> None:
+    def __init__(self, cells: NotebookCells, checker: StaticCodeChecker, the_globals: dict = {}) -> None:
         self.cells = cells
-        self.the_locals: dict = the_locals
-        self.the_globals: dict = self.the_locals
+        self.checker = checker
+        self.the_globals: dict = the_globals
         self.the_globals["__spec__"] = None
         self.the_globals["__builtins__"] = globals()["__builtins__"]
 
     def num_cells(self) -> int:
         return len(self.cells)
 
-    def iter(self) -> Generator[Tuple[NotebookCell, dict, dict, str, str], None, None]:
+    def iter(self) -> Generator[Tuple[NotebookCell, dict, str, str], None, None]:
         for cell in self.cells.iter():
+            is_static = self.checker.is_static(cell, self.the_globals)
+            if is_static and isinstance(self.the_globals, PodNamespace):
+                logger.info(f"Found static cell\n{cell}")
+                self.the_globals.set_managed(False)
             stdout, stderr = "", ""
             try:
                 with contextlib.redirect_stdout(io.StringIO()) as stdout_f, contextlib.redirect_stderr(
                     io.StringIO()
                 ) as stderr_f:
-                    exec(cell, self.the_globals, self.the_locals)
+                    exec(cell, self.the_globals, self.the_globals)
                     stdout = stdout_f.getvalue()
                     stderr = stderr_f.getvalue()
             except Exception:
                 logger.error("Exception while executing...\n" f"{cell}\n" f"...with {traceback.format_exc()}")
                 sys.exit(2)
-            yield cell, self.the_globals, self.the_locals, stdout, stderr
+            if is_static and isinstance(self.the_globals, PodNamespace):
+                self.the_globals.set_managed(True)
+            yield cell, self.the_globals, stdout, stderr
 
 
 class BlockTimeout:
@@ -347,8 +365,9 @@ def run_exp1_impl(args: BenchArgs) -> None:
 
     # Load notebook.
     nb_cells = Notebooks.nb(args)
+    checker = CodeCheckers.checker(args)
     namespace = sut.new_managed_namespace()
-    nb_exec = NotebookExecutor(nb_cells, the_locals=namespace)
+    nb_exec = NotebookExecutor(nb_cells, checker, the_globals=namespace)
     if args.podding_model == "roc-collect":
         RoCFeatureCollectorModel.NAMESPACE = namespace
 
@@ -374,13 +393,13 @@ def run_exp1_impl(args: BenchArgs) -> None:
     for nth in range(nb_exec.num_cells()):
         # Execute next cell.
         exec_start_ts = time.time()
-        cell, the_globals, the_locals, stdout, stderr = next(nb_exec_step)
+        cell, the_globals, stdout, stderr = next(nb_exec_step)
         exec_stop_ts = time.time()
 
         # Dump current state.
         # scalene_profiler.start()
         dump_start_ts = time.time()
-        tid = sut.save(the_locals)
+        tid = sut.save(the_globals)
         dump_stop_ts = time.time()
         # scalene_profiler.stop()
 
@@ -421,7 +440,7 @@ def run_exp1_impl(args: BenchArgs) -> None:
     logger.info(f"Testing {len(test_tids)} loads, {test_tids}")
 
     # Load random steps.
-    loaded_locals: Optional[Namespace] = None
+    loaded_globals: Optional[Namespace] = None
     for nth, tid in enumerate(test_tids):
         # Get load variable names.
         if args.exp1_partial_load:
@@ -435,8 +454,8 @@ def run_exp1_impl(args: BenchArgs) -> None:
         load_start_ts = time.time()
         try:
             with BlockTimeout(300):
-                loaded_locals = sut.load(tid)
-                loaded_locals = sut.load(tid, nameset=load_set)
+                loaded_globals = sut.load(tid)
+                loaded_globals = sut.load(tid, nameset=load_set)
         except TimeoutError as e:
             logger.warning(f"{e}")
         load_stop_ts = time.time()
@@ -449,9 +468,9 @@ def run_exp1_impl(args: BenchArgs) -> None:
         )
 
         # Reset environment to reduce noise.
-        if loaded_locals is not None:
-            del loaded_locals
-            loaded_locals = None
+        if loaded_globals is not None:
+            del loaded_globals
+            loaded_globals = None
         gc.collect()
     expstat.summary()
 
