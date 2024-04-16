@@ -61,7 +61,7 @@ class SnapshotObjectStorage(ObjectStorage):
     def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
         namespace = self._pickling.load(PodId(tid, SnapshotObjectStorage.SNAPSHOT_OID))
         if nameset is not None:
-            namespace = {name: namespace[name] for name in nameset}
+            namespace = {name: namespace[name] for name in nameset if name in namespace}
         return namespace
 
     def estimate_size(self) -> int:
