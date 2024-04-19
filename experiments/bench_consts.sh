@@ -61,10 +61,26 @@ SUTS=(
     "pga"
     "pgcache0"
     "pgcache1m"
+    "pgcache2m"
+    "pgcache4m"
+    "pgcache8m"
+    "pgcache15m"
+    "pgcache31m"
+    "pgcache62m"
+    "pgcache125m"
+    "pgcache250m"
+    "pgcache500m"
     "pgcache1g"
+    "pgcache2g"
+    "pgcache4g"
+    "pgcache8g"
+    "pgcache16g"
     "pgcache10g"
     "pgcache100g"
     "pgnoavf"
+    "pgcache0noavf"
+    "pglnostatic"
+    "pgnostatic"
     "pg0"
     "pg1"
     "prand"
@@ -106,21 +122,66 @@ function get_sut_args() {
     elif [[ $_SUT == "pgcache1m" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 1000000"
+    elif [[ $_SUT == "pgcache2m" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 1953125"
+    elif [[ $_SUT == "pgcache4m" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 3906250"
+    elif [[ $_SUT == "pgcache8m" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 7812500"
+    elif [[ $_SUT == "pgcache15m" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 15625000"
+    elif [[ $_SUT == "pgcache31m" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 31250000"
+    elif [[ $_SUT == "pgcache62m" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 62500000"
+    elif [[ $_SUT == "pgcache125m" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 125000000"
+    elif [[ $_SUT == "pgcache250m" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 250000000"
+    elif [[ $_SUT == "pgcache500m" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 500000000"
     elif [[ $_SUT == "pgcache1g" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 1000000000"
+    elif [[ $_SUT == "pgcache2g" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 2000000000"
+    elif [[ $_SUT == "pgcache4g" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 4000000000"
+    elif [[ $_SUT == "pgcache8g" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 8000000000"
     elif [[ $_SUT == "pgcache10g" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 10000000000"
+    elif [[ $_SUT == "pgcache16g" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 16000000000"
     elif [[ $_SUT == "pgcache100g" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 100000000000"
     elif [[ $_SUT == "pgnoavf" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_active_filter False"
+    elif [[ $_SUT == "pgcache0noavf" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_active_filter False  --pod_cache_size 0"
     elif [[ $_SUT == "pgnostatic" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --auto_static_checker always"
+    elif [[ $_SUT == "pglnostatic" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --auto_static_checker always"
     elif [[ $_SUT == "pg0" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-const --const_roc 0.0"
@@ -182,10 +243,13 @@ function prepare_sut() {
     elif [[ $_SUT == "pga" ]]
     then
         rm -r ${POD_DIR}
-    elif [[ $_SUT == "pgcache0" || $_SUT == "pgcache1m" || $_SUT == "pgcache1g" || $_SUT == "pgcache10g" || $_SUT == "pgcache100g" ]]
+    elif [[ $_SUT == "pgcache0" || $_SUT == "pgcache1m" || $_SUT == "pgcache2m" || $_SUT == "pgcache4m" || $_SUT == "pgcache8m" || $_SUT == "pgcache15m" || $_SUT == "pgcache31m" || $_SUT == "pgcache62m" || $_SUT == "pgcache125m" || $_SUT == "pgcache250m" || $_SUT == "pgcache500m" || $_SUT == "pgcache1g" || $_SUT == "pgcache2g" || $_SUT == "pgcache4g" || $_SUT == "pgcache8g" || $_SUT == "pgcache10g" || $_SUT == "pgcache16g" || $_SUT == "pgcache100g" ]]
     then
         rm -r ${POD_DIR}
-    elif [[ $_SUT == "pgnoavf" ]]
+    elif [[ $_SUT == "pgnoavf" || $_SUT == "pgcache0noavf" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pglnostatic" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pgnostatic" ]]

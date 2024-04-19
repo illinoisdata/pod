@@ -536,6 +536,8 @@ class StaticPodPicklingDumpSession(PodPicklingDumpSession):
         self.writer.__exit__(exc_type, exc_val, exc_tb)
         self.writer = None
 
+        # logger.error(f"num objects= {len(self.ctx.memo.physical_memo)}")  # stat_numobjs
+
         if self.pickling.post_podding_fn is not None:
             self.pickling.post_podding_fn()
 

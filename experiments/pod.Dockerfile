@@ -30,7 +30,7 @@ RUN apt-get install mongodb-mongosh --yes
 
 # Install requirements first to improve cachings
 COPY ./requirements.txt /pod/requirements.txt
-RUN apt-get install libpq-dev --yes
+RUN apt-get install libpq-dev libhdf5-dev pkg-config --yes
 RUN python -m pip install -r /pod/requirements.txt
 
 # Install Pod
