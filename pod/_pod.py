@@ -172,10 +172,12 @@ class PodObjectStorage(ObjectStorage):
         return self._pickling.load(PodId(tid, PodObjectStorage.NAMEMAP_OID))
 
     def _save_objects(self, tid: TimeId, namespace: Namespace, namemap_pid: PodId, namemap: Namemap) -> None:
-        podspace = {pid: dict.__getitem__(namespace, name) for name, pid in namemap.items() if pid.tid == tid}
+        new_namepids = sorted([(name, pid) for name, pid in namemap.items() if pid.tid == tid], key=lambda npid: npid[0])
+        podspace = {pid: dict.__getitem__(namespace, name) for name, pid in new_namepids}
         with self._pickling.dump_batch({namemap_pid: namemap_pid, **podspace}) as dump_session:
             dump_session.dump(namemap_pid, namemap)
-            for pid, obj in podspace.items():  # TODO: Stabilize the order?
+            for name, pid in new_namepids:  # This save objects in alphabetical order.
+                obj = podspace[pid]
                 dump_session.dump(pid, obj)
 
     def _load_objects(self, namemap: Namemap) -> Namespace:
@@ -236,19 +238,19 @@ class AsyncPodNamespace(PodNamespace):
     def __getitem__(self, name: str) -> Object:
         if threading.get_ident() in self._saving_threads or not self.managed:  # Skip activating name for saving tread.
             return dict.__getitem__(self, name)
-        with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
+        with LockIf(self._namespace_lock, self.is_locked_name(name), self._pod_storage._expstat):
             return PodNamespace.__getitem__(self, name)
 
     def __setitem__(self, name: str, obj: Object) -> None:
         if threading.get_ident() in self._saving_threads or not self.managed:
             return dict.__setitem__(self, name, obj)
-        with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
+        with LockIf(self._namespace_lock, self.is_locked_name(name), self._pod_storage._expstat):
             return PodNamespace.__setitem__(self, name, obj)
 
     def __delitem__(self, name: str):
         if threading.get_ident() in self._saving_threads or not self.managed:
             return dict.__delitem__(self, name)
-        with LockIf(self._namespace_lock, name in self._locked_names, self._pod_storage._expstat):
+        with LockIf(self._namespace_lock, self.is_locked_name(name), self._pod_storage._expstat):
             return PodNamespace.__delitem__(self, name)
 
     def items(self):
@@ -268,6 +270,9 @@ class AsyncPodNamespace(PodNamespace):
             self._namespace_lock.release()
             self._locked_names.clear()
             self._saving_threads.discard(threading.get_ident())
+
+    def is_locked_name(self, name: str) -> bool:
+        return len(self._locked_names) > 0 and (self._pod_storage._always_lock_all or name in self._locked_names)
 
 
 class AsyncPodSaveThread(threading.Thread):
@@ -292,6 +297,9 @@ class AsyncPodSaveThread(threading.Thread):
             pid: dict.__getitem__(self._namespace, name) for name, pid in self._namemap.items() if pid.tid == self._tid
         }
         self._active_names = {name for name, pid in self._namemap.items() if pid.tid == self._tid}
+        self._active_name_pids = sorted(
+            [(name, pid) for name, pid in self._namemap.items() if pid.tid == self._tid], key=lambda npid: npid[0]
+        )
 
         self._run_barrier = threading.Barrier(2, timeout=5)  # This should be quick (<1 second).
 
@@ -306,7 +314,8 @@ class AsyncPodSaveThread(threading.Thread):
         # Actual saving.
         with self._pod_storage._pickling.dump_batch({self._namemap_pid: self._namemap, **self._podspace}) as dump_session:
             dump_session.dump(self._namemap_pid, self._namemap)
-            for pid, obj in self._podspace.items():
+            for name, pid in self._active_name_pids:
+                obj = self._podspace[pid]
                 dump_session.dump(pid, obj)
             self._namespace.release()
 
@@ -326,8 +335,14 @@ class AsyncPodSaveThread(threading.Thread):
 class AsyncPodObjectStorage(PodObjectStorage):
     NAMEMAP_OID = 0  # Assume no object resides at this address.
 
-    def __init__(self, pickling: PodPickling, active_filter: bool = True) -> None:
+    def __init__(
+        self,
+        pickling: PodPickling,
+        active_filter: bool = True,
+        always_lock_all: bool = False,
+    ) -> None:
         PodObjectStorage.__init__(self, pickling, active_filter)
+        self._always_lock_all = always_lock_all
         self._running_save: Optional[threading.Thread] = None
 
         self._expstat: Optional[ExpStat] = None

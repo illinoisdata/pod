@@ -23,6 +23,7 @@ from pod._pod import AsyncPodObjectStorage, Namespace, ObjectStorage, PodNamespa
 from pod.bench_consts import PARTIAL_LOAD_NAMES
 from pod.common import TimeId
 from pod.feature import __FEATURE__
+from pod.memo import MemoPageAllocator
 from pod.model import (
     ConstRoCModel,
     FeatureCollectorModel,
@@ -40,6 +41,7 @@ from pod.pickling import (
     PostPoddingFunction,
     SnapshotPodPickling,
     StaticPodPickling,
+    pickle,
 )
 from pod.static import AllowlistStaticCodeChecker, AlwaysNonStaticCodeChecker, StaticCodeChecker
 from pod.stats import ExpStat
@@ -80,6 +82,7 @@ class BenchArgs:
 
     """ Pod storage """
     sut_async: bool = False  # Use async SUT.
+    always_lock_all: bool = False  # Always lock all variables (disabling active variable locks).
     pod_dir: Optional[Path] = None  # Path to pod storage root directory.
     pod_active_filter: bool = True  # Whether to filter active variables for saving.
     pod_cache_size: int = 32_000_000_000  # Pod thesaurus capacity.
@@ -278,6 +281,9 @@ class SUT:
         if args.podding_model == "manual":
             return ManualPodding.podding_fn, None
         elif args.podding_model == "naive":
+            if args.nbname in ["ai4code"]:
+                MemoPageAllocator.PAGE_SIZE = 2**6
+                logger.info(f"Tuning down {MemoPageAllocator.PAGE_SIZE=}")
             naive_model = NaivePoddingModel()
             return naive_model.podding_fn, None
         elif args.podding_model == "greedy-xgb":
@@ -295,6 +301,9 @@ class SUT:
             gc_model = GreedyPoddingModel(roc_model=const_roc_model, pod_overhead=args.cm_pod_overhead)
             return gc_model.podding_fn, gc_model.post_podding_fn
         elif args.podding_model == "random":
+            if args.nbname in ["ai4code", "twittnet"]:
+                MemoPageAllocator.PAGE_SIZE = 2**6
+                logger.info(f"Tuning down {MemoPageAllocator.PAGE_SIZE=}")
             return RandomPoddingModel().podding_fn, None
         elif args.podding_model == "manual-collect":
             fc_model = FeatureCollectorModel(args.result_dir / args.expname / "manual-collect.csv", ManualPodding.podding_fn)
@@ -352,7 +361,7 @@ class SUT:
         if args.sut == "snapshot":
             return SnapshotObjectStorage(pickling)
         if args.sut_async:
-            return AsyncPodObjectStorage(pickling, args.pod_active_filter)
+            return AsyncPodObjectStorage(pickling, args.pod_active_filter, args.always_lock_all)
         return PodObjectStorage(pickling, args.pod_active_filter)
 
 
@@ -440,6 +449,10 @@ def run_exp1_impl(args: BenchArgs) -> None:
     result_path = expstat.save(args.result_dir / args.expname / "expstat.json")
     logger.info(f"Saved ExpStat (dump only) to {result_path}")
 
+    # Reset the random state.
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+
     # Test equal number of loads per time ID.
     test_tids = tids * args.exp1_num_loads_per_save
     random.shuffle(test_tids)
@@ -459,18 +472,23 @@ def run_exp1_impl(args: BenchArgs) -> None:
         # Load state.
         load_start_ts = time.time()
         try:
-            with BlockTimeout(300):
-                loaded_globals = sut.load(tid)
+            with BlockTimeout(600):
                 loaded_globals = sut.load(tid, nameset=load_set)
         except TimeoutError as e:
             logger.warning(f"{e}")
         load_stop_ts = time.time()
+
+        try:
+            loaded_size_b = len(pickle.dumps(loaded_globals))
+        except Exception:
+            loaded_size_b = 0
 
         # Record measurements.
         expstat.add_load(
             nth=nth,
             tid=tid,
             time_s=load_stop_ts - load_start_ts,
+            load_b=loaded_size_b,
         )
 
         # Reset environment to reduce noise.

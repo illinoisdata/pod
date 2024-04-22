@@ -81,11 +81,13 @@ SUTS=(
     "pgcache0noavf"
     "pglnostatic"
     "pgnostatic"
+    "pgnoavl"
+    "pgnoavlstatic"
+    "pglnoavlstatic"
     "pg0"
     "pg1"
     "prand"
     "pnv"
-    "pna"
     "ppg"
     "prd"
     "pnj"
@@ -179,6 +181,15 @@ function get_sut_args() {
     elif [[ $_SUT == "pgnostatic" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --auto_static_checker always"
+    elif [[ $_SUT == "pgnoavl" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --always_lock_all True"
+    elif [[ $_SUT == "pgnoavlstatic" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --auto_static_checker always --always_lock_all True"
+    elif [[ $_SUT == "pglnoavlstatic" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --auto_static_checker always --always_lock_all True"
     elif [[ $_SUT == "pglnostatic" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --auto_static_checker always"
@@ -190,11 +201,8 @@ function get_sut_args() {
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-const --const_roc 1.0"
     elif [[ $_SUT == "prand" ]]
     then
-        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model random"
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model random --sut_async"
     elif [[ $_SUT == "pnv" ]]
-    then
-        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive"
-    elif [[ $_SUT == "pna" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive --sut_async"
     elif [[ $_SUT == "ppg" ]]
@@ -252,7 +260,7 @@ function prepare_sut() {
     elif [[ $_SUT == "pglnostatic" ]]
     then
         rm -r ${POD_DIR}
-    elif [[ $_SUT == "pgnostatic" ]]
+    elif [[ $_SUT == "pgnostatic" || $_SUT == "pgnoavl" || $_SUT == "pgnoavlstatic" || $_SUT == "pglnoavlstatic" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pg0" ]]
@@ -265,9 +273,6 @@ function prepare_sut() {
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pnv" ]]
-    then
-        rm -r ${POD_DIR}
-    elif [[ $_SUT == "pna" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "ppg" ]]
