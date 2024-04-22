@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Set, Union
+from typing import Dict, List, Optional, Set, Union
 
 from dataclasses_json import dataclass_json
 from loguru import logger
@@ -65,6 +65,7 @@ class LoadStat:
     nth: int
     tid: TimeId
     time_s: float
+    load_b: Optional[int]
 
 
 @dataclass_json
@@ -98,19 +99,20 @@ class ExpStat:
             f", avgt= {strf_deltatime(dump_avg_t_s)} ({strf_throughput(1.0/dump_avg_t_s)})"
         )
 
-    def add_load(self, nth: int, tid: TimeId, time_s: float) -> None:
+    def add_load(self, nth: int, tid: TimeId, time_s: float, load_b: int) -> None:
         self.loads.append(
             LoadStat(
                 nth=nth,
                 tid=tid,
                 time_s=time_s,
+                load_b=load_b,
             )
         )
 
         self.load_sum_t_s += time_s
         load_avg_t_s = self.load_sum_t_s / len(self.loads)
         logger.info(
-            f"nth= {nth}, tid= {tid}, t= {strf_deltatime(time_s)}"
+            f"nth= {nth}, tid= {tid:2d}, ls= {strf_storage(load_b)}, t= {strf_deltatime(time_s)}"
             f", avgt= {strf_deltatime(load_avg_t_s)} ({strf_throughput(1.0/load_avg_t_s)})"
         )
 
