@@ -19,7 +19,19 @@ import simple_parsing
 from loguru import logger
 
 import pod.storage
-from pod._pod import AsyncPodObjectStorage, Namespace, ObjectStorage, PodNamespace, PodObjectStorage, SnapshotObjectStorage
+from pod._pod import (
+    AsyncPodObjectStorage,
+    CloudpickleObjectStorage,
+    DillObjectStorage,
+    Namespace,
+    ObjectStorage,
+    PodNamespace,
+    PodObjectStorage,
+    ShelveObjectStorage,
+    SnapshotObjectStorage,
+    ZODBObjectStorage,
+    ZODBSplitObjectStorage,
+)
 from pod.bench_consts import PARTIAL_LOAD_NAMES
 from pod.common import TimeId
 from pod.feature import __FEATURE__
@@ -29,6 +41,7 @@ from pod.model import (
     FeatureCollectorModel,
     GreedyPoddingModel,
     LightGBMClassifierRoC,
+    NaiveBundlePoddingModel,
     NaivePoddingModel,
     RandomPoddingModel,
     RoCFeatureCollectorModel,
@@ -179,13 +192,15 @@ class RandomMutatingListCells(NotebookCells):
                 f"  secrets.token_bytes({self.elem_size})\n"
                 f"  for idx in range({self.list_size})\n"
                 "]\n"
-                "l2 = [l]; l.append(l2)"  # Test self-referential objects.
+                "l2 = [l]; l.append(l2)\n"  # Test self-referential objects.
+                "a = []; b1 = [a]; b2 = [a]"  # Test shared reference.
             )
 
         # Mutate elements randomly.
         return (
-            f"for idx in random.sample(range(len(l)), {self.num_elem_mutate}):\n"
-            f"  l[idx] = secrets.token_bytes({self.elem_size})"
+            f"for idx in random.sample(range(len(l) - 1), {self.num_elem_mutate}):\n"
+            f"  l[idx] = secrets.token_bytes({self.elem_size})\n"
+            f"a.append({idx})"
         )
 
     def __len__(self) -> int:
@@ -230,7 +245,11 @@ class NotebookExecutor:
 
     def iter(self) -> Generator[Tuple[NotebookCell, dict, str, str], None, None]:
         for cell in self.cells.iter():
+            if isinstance(self.the_globals, PodNamespace):
+                self.the_globals.set_managed(False)
             is_static = self.checker.is_static(cell, self.the_globals)
+            if isinstance(self.the_globals, PodNamespace):
+                self.the_globals.set_managed(True)
 
             if is_static and isinstance(self.the_globals, PodNamespace):
                 # logger.info(f"Found static cell\n{cell}")
@@ -286,6 +305,9 @@ class SUT:
                 logger.info(f"Tuning down {MemoPageAllocator.PAGE_SIZE=}")
             naive_model = NaivePoddingModel()
             return naive_model.podding_fn, None
+        elif args.podding_model == "naive-bundle":
+            naive_bundle_model = NaiveBundlePoddingModel()
+            return naive_bundle_model.podding_fn, None
         elif args.podding_model == "greedy-xgb":
             assert args.roc_path is not None, "greedy-xgb requires --roc_path"
             roc_xgb_model = XGBRegressorRoC.load_from(args.roc_path)
@@ -357,12 +379,29 @@ class SUT:
     @staticmethod
     def sut(args: BenchArgs) -> ObjectStorage:
         pod.storage.POD_CACHE_SIZE = args.pod_cache_size
-        pickling = SUT.pickling(args)
         if args.sut == "snapshot":
+            pickling = SUT.pickling(args)
             return SnapshotObjectStorage(pickling)
-        if args.sut_async:
-            return AsyncPodObjectStorage(pickling, args.pod_active_filter, args.always_lock_all)
-        return PodObjectStorage(pickling, args.pod_active_filter)
+        elif args.sut == "dill":
+            assert args.pod_dir is not None, "dill requires --pod_dir"
+            return DillObjectStorage(args.pod_dir)
+        elif args.sut == "cloudpickle":
+            assert args.pod_dir is not None, "cloudpickle requires --pod_dir"
+            return CloudpickleObjectStorage(args.pod_dir)
+        elif args.sut == "shelve":
+            assert args.pod_dir is not None, "shelve requires --pod_dir"
+            return ShelveObjectStorage(args.pod_dir)
+        elif args.sut == "zodb":
+            assert args.pod_dir is not None, "zodb requires --pod_dir"
+            return ZODBObjectStorage(args.pod_dir)
+        elif args.sut == "zosp":
+            assert args.pod_dir is not None, "zosp requires --pod_dir"
+            return ZODBSplitObjectStorage(args.pod_dir)
+        else:  # pod suts.
+            pickling = SUT.pickling(args)
+            if args.sut_async:
+                return AsyncPodObjectStorage(pickling, args.pod_active_filter, args.always_lock_all)
+            return PodObjectStorage(pickling, args.pod_active_filter)
 
 
 """ Main procedures """
@@ -477,6 +516,10 @@ def run_exp1_impl(args: BenchArgs) -> None:
         except TimeoutError as e:
             logger.warning(f"{e}")
         load_stop_ts = time.time()
+
+        # Share reference test.
+        # loaded_globals["a"].append("NEW")
+        # print(loaded_globals["a"], loaded_globals["b1"], loaded_globals["b2"])
 
         try:
             loaded_size_b = len(pickle.dumps(loaded_globals))

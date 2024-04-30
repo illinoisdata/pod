@@ -18,6 +18,7 @@ import neo4j
 import psycopg2
 import pymongo
 import redis
+import xxhash
 from dataclasses_json import dataclass_json
 from loguru import logger
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
@@ -25,7 +26,7 @@ from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from pod.algo import union_find
 from pod.common import PodDependency, PodId
 
-POD_CACHE_SIZE = 32_000_000_000
+POD_CACHE_SIZE = 1_000_000_000
 
 
 def serialize_pod_id(pod_id: PodId) -> bytes:
@@ -101,7 +102,7 @@ class PodBytesMemo:
     def new(max_size: int) -> PodBytesMemo:
         return PodBytesMemo(
             max_size=max_size,
-            min_size=128,
+            min_size=0,
             size=0,
             memo_page={},
         )
@@ -248,9 +249,10 @@ class FilePodStorageWriter(PodWriter):
         pod_id: PodId,
         pod_bytes: bytes,
     ) -> None:
-        if pod_bytes in self.storage.pod_bytes_memo:
+        pod_bytes_key = xxhash.xxh3_128_digest(pod_bytes) if self.storage.memo_hash else pod_bytes
+        if pod_bytes_key in self.storage.pod_bytes_memo:
             # Save as synonymous pids.
-            same_pod_id = self.storage.pod_bytes_memo.get(pod_bytes)
+            same_pod_id = self.storage.pod_bytes_memo.get(pod_bytes_key)
             self.new_pid_synonyms[pod_id] = same_pod_id
             # global max_tid_diff  # stat_max_tid_diff
             # if max_tid_diff < pod_id.tid - same_pod_id.tid:  # stat_max_tid_diff
@@ -258,7 +260,7 @@ class FilePodStorageWriter(PodWriter):
             #     print(max_tid_diff, pod_id, same_pod_id, len(pod_bytes))  # stat_max_tid_diff
         else:
             # New pod bytes.
-            self.storage.pod_bytes_memo.put(pod_bytes, pod_id)
+            self.storage.pod_bytes_memo.put(pod_bytes_key, pod_id)
 
             # Write to buffer.
             if len(pod_bytes) > FilePodStorageWriter.SMALL_POD_SIZE:
@@ -312,6 +314,7 @@ class FilePodStorageWriter(PodWriter):
             self.storage.update_index(self.new_pid_index)
         if len(self.new_pid_synonyms) > 0:
             self.storage.update_pid_synonym(self.new_pid_synonyms)
+        logger.warning(f"memo_size= {self.storage.pod_bytes_memo.size}")
 
 
 class FilePodStorageReader(PodReader):
@@ -357,9 +360,10 @@ class FilePodStorageReader(PodReader):
 
 
 class FilePodStorage(PodStorage):
-    def __init__(self, root_dir: Path) -> None:
+    def __init__(self, root_dir: Path, memo_hash: bool = True) -> None:
         self.root_dir = root_dir
         self.root_dir.mkdir(parents=True, exist_ok=True)
+        self.memo_hash = memo_hash
 
         self.stats = FilePodStorageStats(
             pod_page_count=0,
@@ -406,7 +410,9 @@ class FilePodStorage(PodStorage):
 
     def update_deps(self, new_deps: FilePodStoragePodIdDep) -> None:
         self.deps.update(new_deps)
-        for pid, root_pid in union_find(new_deps):
+        for (tid, oid), (root_tid, root_oid) in union_find(new_deps):
+            pid = PodId(tid, oid)
+            root_pid = PodId(root_tid, root_oid)
             self.roots[pid] = root_pid
 
     def estimate_size(self) -> int:

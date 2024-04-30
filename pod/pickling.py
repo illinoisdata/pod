@@ -276,10 +276,23 @@ class StaticPodPicklingMetadata:
 
 class BaseStaticPodPickler(BasePickler):
     IMMUTABLE_TYPES = (
+        # Primitive immutable types.
         str,
         bytes,
+        int,
+        float,
+        complex,
+        bool,
+        # Immutable collections.
+        tuple,
+        frozenset,
+        NoneType,
         # Not all class types are immutable but pickle saves them as a global object anyway.
         type,
+        FunctionType,
+        ModuleType,
+        CodeType,
+        pd.DataFrame,
     )
 
     def __init__(self, *args, **kwargs) -> None:
@@ -292,6 +305,8 @@ class BaseStaticPodPickler(BasePickler):
         raise NotImplementedError("Abstract method")
 
     def is_immutable(self, obj: Object) -> bool:
+        if isinstance(obj, dict):
+            return len(set(obj) & {"_mgr", "_typ", "_metadata", "attrs", "_flags"}) == 5
         return isinstance(obj, BaseStaticPodPickler.IMMUTABLE_TYPES)
 
 
