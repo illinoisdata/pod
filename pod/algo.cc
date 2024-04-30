@@ -1,10 +1,11 @@
 #include <Python.h>
 #include <unordered_map>
+#include <vector>
 
 // Define structures
 typedef struct {
-    long int tid;
-    long int oid;
+    size_t tid;
+    size_t oid;
 } PodId;
 
 // Define equality comparison for PodId
@@ -15,7 +16,7 @@ bool operator==(const PodId& lhs, const PodId& rhs) {
 // Define a hash function for PodId
 struct PodIdHash {
     std::size_t operator()(const PodId& pid) const {
-        auto h = std::hash<long int>();
+        auto h = std::hash<size_t>();
         std::size_t hash_tid = h(pid.tid);
         std::size_t hash_oid = h(pid.oid);
         return hash_tid ^ (hash_oid << 1); // Combine tid and oid hashes
@@ -30,12 +31,6 @@ struct PodIdEqual {
 };
 
 typedef std::unordered_map<PodId, PodId, PodIdHash, PodIdEqual> RootsDict;
-
-typedef struct {
-    int id;
-    PyObject *dep_pids; // Assuming dep_pids is a list of PodId objects
-    int immutable;
-} PodDependency;
 
 // Declare find_root function
 PodId find_root(PodId pid, RootsDict& roots_dict);
@@ -56,6 +51,7 @@ static PyObject* union_find(PyObject *self, PyObject *args) {
     // fprintf(stderr, "Iterating %ld items\n", num_deps);
 
     // Union find iterations
+    std::vector<PodId> all_pids;
     for (Py_ssize_t i = 0; i < num_deps; i++) {
         PyObject *pid_key = PyList_GetItem(deps_keys, i);
         PyObject *dep = PyDict_GetItem(deps_dict, pid_key);
@@ -64,6 +60,12 @@ static PyObject* union_find(PyObject *self, PyObject *args) {
         pid.tid = PyLong_AsLong(PyObject_GetAttrString(pid_key, "tid"));
         pid.oid = PyLong_AsLong(PyObject_GetAttrString(pid_key, "oid"));
         // fprintf(stderr, "At tid= %ld, oid= %ld\n", pid.tid, pid.oid);
+        all_pids.push_back(pid);
+
+        int immutable = PyObject_IsTrue(PyObject_GetAttrString(dep, "immutable"));
+        if (immutable) {
+            continue;
+        }
 
         PyObject *dep_pids = PyObject_GetAttrString(dep, "dep_pids");
 
@@ -81,12 +83,15 @@ static PyObject* union_find(PyObject *self, PyObject *args) {
             // fprintf(stderr, "  At tid= %ld, oid= %ld\n", pid2.tid, pid2.oid);
 
             PyObject *dep2 = PyDict_GetItem(deps_dict, pid2_key);
-            int immutable = PyObject_IsTrue(PyObject_GetAttrString(dep2, "immutable"));
-            if (immutable) {
+            int immutable2 = PyObject_IsTrue(PyObject_GetAttrString(dep2, "immutable"));
+            if (immutable2) {
                 continue;
             }
             PodId root_pid = find_root(pid, roots_dict);
             PodId root_pid2 = find_root(pid2, roots_dict);
+            if (root_pid.oid == 0 || root_pid2.oid == 0) {
+                continue;
+            }
             roots_dict[root_pid2] = root_pid;
         }
         Py_DECREF(dep_pids);
@@ -95,15 +100,18 @@ static PyObject* union_find(PyObject *self, PyObject *args) {
     Py_DECREF(deps_keys);
 
     // Translate roots_dict to a Python dictionary
-    PyObject *py_roots_dict = PyDict_New();
-    for (const auto& entry : roots_dict) {
-        PodId key = entry.first;
-        PodId value = entry.second;
-        PyObject *py_key = Py_BuildValue("(ii)", key.tid, key.oid);
-        PyObject *py_value = Py_BuildValue("(ii)", value.tid, value.oid);
-        PyDict_SetItem(py_roots_dict, py_key, py_value);
-        Py_DECREF(py_key);
-        Py_DECREF(py_value);
+    // PyObject *py_roots_dict = PyDict_New();
+    PyObject *py_roots_dict = PyList_New(0);
+    for (const PodId& key : all_pids) {
+        PodId value = find_root(key, roots_dict);
+        // PyObject *py_key = Py_BuildValue("(KK)", key.tid, key.oid);
+        // PyObject *py_value = Py_BuildValue("(KK)", value.tid, value.oid);
+        // PyDict_SetItem(py_roots_dict, py_key, py_value);
+        // Py_DECREF(py_key);
+        // Py_DECREF(py_value);
+        PyObject *py_kv = Py_BuildValue("((KK)(KK))", key.tid, key.oid, value.tid, value.oid);
+        PyList_Append(py_roots_dict, py_kv);
+        Py_DECREF(py_kv);
     }
 
     return py_roots_dict;

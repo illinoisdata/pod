@@ -2,8 +2,11 @@ from __future__ import annotations  # isort:skip
 
 import os
 import pickle as _pickle
+import shelve
 from dataclasses import dataclass
 from typing import Any, Dict, List, Set
+
+import zodbpickle.pickle
 
 # Use Python pickle for testing pod prototype. When ideas are solidified and pod is implemented in C, revert this back.
 _pickle.Pickler = _pickle._Pickler  # type: ignore
@@ -163,6 +166,11 @@ if BASE_PICKLE == "dill":
     # dill.detect.globalvars = pod_detect.globalvars
     dill.detect.globalvars = PodDetect.safe_globalvars
 
+    shelve.Pickler = dill.Pickler  # type: ignore
+    shelve.Unpickler = dill.Unpickler  # type: ignore
+
+    zodbpickle.pickle = dill
+
 elif BASE_PICKLE == "cloudpickle":
     # Must be imported after the pickle switch.
     import cloudpickle.cloudpickle as _cloudpickle  # noqa: E402
@@ -273,6 +281,11 @@ elif BASE_PICKLE == "cloudpickle":
     #     self.save_reduce(*rv, obj=obj)
 
     # _cloudpickle.Pickler.dispatch[_cloudpickle.types.FunctionType] = save_function
+
+    shelve.Pickler = _cloudpickle.Pickler  # type: ignore
+    shelve.Unpickler = _cloudpickle.Unpickler  # type: ignore
+
+    zodbpickle.pickle = _cloudpickle
 
 elif BASE_PICKLE == "pickle":
     pass

@@ -54,12 +54,27 @@ function get_nb_path() {
 
 SUTS=(
     "snp" 
+    "dill" 
+    "cpkl" # Recursion error on self-references
+    "shev" 
+    "zodb" 
+    "zosp" 
     "imm"
     "pfl"
     "pfa"
     "pgl"
     "pga"
     "pgcache0"
+    "pgcache4"
+    "pgcache16"
+    "pgcache64"
+    "pgcache256"
+    "pgcache1024"
+    "pgcache4096"
+    "pgcache16384"
+    "pgcache65536"
+    "pgcache262144"
+    "pgcache1048576"
     "pgcache1m"
     "pgcache2m"
     "pgcache4m"
@@ -88,6 +103,7 @@ SUTS=(
     "pg1"
     "prand"
     "pnv"
+    "pnb"
     "ppg"
     "prd"
     "pnj"
@@ -103,6 +119,21 @@ function get_sut_args() {
     if [[ $_SUT == "snp" ]]
     then
         sut_args="--sut snapshot --pod_dir ${POD_DIR}"
+    elif [[ $_SUT == "dill" ]]
+    then
+        sut_args="--sut dill --pod_dir ${POD_DIR}"
+    elif [[ $_SUT == "cpkl" ]]
+    then
+        sut_args="--sut cloudpickle --pod_dir ${POD_DIR}"
+    elif [[ $_SUT == "shev" ]]
+    then
+        sut_args="--sut shelve --pod_dir ${POD_DIR}"
+    elif [[ $_SUT == "zodb" ]]
+    then
+        sut_args="--sut zodb --pod_dir ${POD_DIR}"
+    elif [[ $_SUT == "zosp" ]]
+    then
+        sut_args="--sut zosp --pod_dir ${POD_DIR}"
     elif [[ $_SUT == "imm" ]]
     then
         sut_args="--sut inmem_dict"
@@ -121,6 +152,36 @@ function get_sut_args() {
     elif [[ $_SUT == "pgcache0" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 0"
+    elif [[ $_SUT == "pgcache4" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 4"
+    elif [[ $_SUT == "pgcache16" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 16"
+    elif [[ $_SUT == "pgcache64" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 64"
+    elif [[ $_SUT == "pgcache256" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 256"
+    elif [[ $_SUT == "pgcache1024" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 1024"
+    elif [[ $_SUT == "pgcache4096" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 4096"
+    elif [[ $_SUT == "pgcache16384" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 16384"
+    elif [[ $_SUT == "pgcache65536" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 65536"
+    elif [[ $_SUT == "pgcache262144" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 262144"
+    elif [[ $_SUT == "pgcache1048576" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 1048576"
     elif [[ $_SUT == "pgcache1m" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 1000000"
@@ -205,6 +266,9 @@ function get_sut_args() {
     elif [[ $_SUT == "pnv" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive --sut_async"
+    elif [[ $_SUT == "pnb" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model naive-bundle --sut_async"
     elif [[ $_SUT == "ppg" ]]
     then
         sut_args="--sut pod_psql --psql_hostname podpsql --psql_port 5432"
@@ -236,6 +300,21 @@ function prepare_sut() {
     if [[ $_SUT == "snp" ]]
     then
         rm -r ${POD_DIR}
+    elif [[ $_SUT == "dill" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "cpkl" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "shev" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "zodb" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "zosp" ]]
+    then
+        rm -r ${POD_DIR}
     elif [[ $_SUT == "imm" ]]
     then
         :
@@ -251,7 +330,7 @@ function prepare_sut() {
     elif [[ $_SUT == "pga" ]]
     then
         rm -r ${POD_DIR}
-    elif [[ $_SUT == "pgcache0" || $_SUT == "pgcache1m" || $_SUT == "pgcache2m" || $_SUT == "pgcache4m" || $_SUT == "pgcache8m" || $_SUT == "pgcache15m" || $_SUT == "pgcache31m" || $_SUT == "pgcache62m" || $_SUT == "pgcache125m" || $_SUT == "pgcache250m" || $_SUT == "pgcache500m" || $_SUT == "pgcache1g" || $_SUT == "pgcache2g" || $_SUT == "pgcache4g" || $_SUT == "pgcache8g" || $_SUT == "pgcache10g" || $_SUT == "pgcache16g" || $_SUT == "pgcache100g" ]]
+    elif [[ $_SUT == "pgcache0" || $_SUT == "pgcache4" || $_SUT == "pgcache16" || $_SUT == "pgcache64" || $_SUT == "pgcache256" || $_SUT == "pgcache1024" || $_SUT == "pgcache4096" || $_SUT == "pgcache16384" || $_SUT == "pgcache65536" || $_SUT == "pgcache262144" || $_SUT == "pgcache1048576" || $_SUT == "pgcache1m" || $_SUT == "pgcache2m" || $_SUT == "pgcache4m" || $_SUT == "pgcache8m" || $_SUT == "pgcache15m" || $_SUT == "pgcache31m" || $_SUT == "pgcache62m" || $_SUT == "pgcache125m" || $_SUT == "pgcache250m" || $_SUT == "pgcache500m" || $_SUT == "pgcache1g" || $_SUT == "pgcache2g" || $_SUT == "pgcache4g" || $_SUT == "pgcache8g" || $_SUT == "pgcache10g" || $_SUT == "pgcache16g" || $_SUT == "pgcache100g" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pgnoavf" || $_SUT == "pgcache0noavf" ]]
@@ -273,6 +352,9 @@ function prepare_sut() {
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pnv" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pnb" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "ppg" ]]

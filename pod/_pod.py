@@ -5,10 +5,18 @@ Pod storage interface.
 from __future__ import annotations  # isort:skip
 import pod.__pickle__  # noqa, isort:skip
 
+import shelve
 import threading
 import time
 from pathlib import Path
 from typing import Dict, Optional, Set, Tuple
+
+import cloudpickle
+import dill
+import transaction as ZODB_transaction
+import ZODB
+import ZODB.FileStorage
+from loguru import logger
 
 from pod.common import Object, PodId, TimeId, step_time_id
 from pod.pickling import ManualPodding, PodPickling, SnapshotPodPickling, StaticPodPickling
@@ -68,6 +76,206 @@ class SnapshotObjectStorage(ObjectStorage):
         return self._pickling.estimate_size()
 
 
+""" Dill namespace storage """
+
+
+class DillObjectStorage(ObjectStorage):
+    def __init__(self, root_dir: Path) -> None:
+        self._root_dir = root_dir
+        self._root_dir.mkdir(parents=True, exist_ok=True)
+
+    def save(self, namespace: Namespace) -> TimeId:
+        tid = step_time_id()
+        with open(self.pickle_path(tid), "wb") as f:
+            dill.dump(namespace, f)
+        return tid
+
+    def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
+        with open(self.pickle_path(tid), "rb") as f:
+            namespace = dill.load(f)
+        if nameset is not None:
+            namespace = {name: namespace[name] for name in nameset if name in namespace}
+        return namespace
+
+    def estimate_size(self) -> int:
+        return sum(f.stat().st_size for f in self._root_dir.glob("**/*") if f.is_file())
+
+    def pickle_path(self, tid: TimeId) -> Path:
+        return self._root_dir / f"t{tid}.pkl"
+
+
+""" Cloudpickle namespace storage """
+
+
+class CloudpickleObjectStorage(ObjectStorage):
+    def __init__(self, root_dir: Path) -> None:
+        self._root_dir = root_dir
+        self._root_dir.mkdir(parents=True, exist_ok=True)
+
+    def save(self, namespace: Namespace) -> TimeId:
+        tid = step_time_id()
+        with open(self.pickle_path(tid), "wb") as f:
+            cloudpickle.dump(namespace, f)
+        return tid
+
+    def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
+        with open(self.pickle_path(tid), "rb") as f:
+            namespace = cloudpickle.load(f)
+        if nameset is not None:
+            namespace = {name: namespace[name] for name in nameset if name in namespace}
+        return namespace
+
+    def estimate_size(self) -> int:
+        return sum(f.stat().st_size for f in self._root_dir.glob("**/*") if f.is_file())
+
+    def pickle_path(self, tid: TimeId) -> Path:
+        return self._root_dir / f"t{tid}.pkl"
+
+
+""" Shelve namespace storage """
+
+
+class ShelveObjectStorage(ObjectStorage):
+    def __init__(self, root_dir: Path) -> None:
+        self._root_dir = root_dir
+        self._root_dir.mkdir(parents=True, exist_ok=True)
+
+    def save(self, namespace: Namespace) -> TimeId:
+        tid = step_time_id()
+        with shelve.open(self.db_path()) as db:
+            db[f"{tid}"] = namespace.keys()
+            for name, obj in namespace.items():
+                db[f"{tid}:{name}"] = obj
+        return tid
+
+    def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
+        with shelve.open(self.db_path()) as db:
+            if nameset is None:
+                nameset = set(db[f"{tid}"])
+            return {name: db[f"{tid}:{name}"] for name in nameset if f"{tid}:{name}" in db}
+
+    def estimate_size(self) -> int:
+        return sum(f.stat().st_size for f in self._root_dir.glob("**/*") if f.is_file())
+
+    def db_path(self) -> str:
+        import dbm.dumb
+
+        db_path = str(self._root_dir / "shelve")
+        db = dbm.dumb.open(db_path, "c")  # Initialize dbm (ndbm does not work)
+        db.close()
+        return db_path
+
+
+# Not importable: no longer maintain.
+
+# """ Chest namespace storage """
+
+
+# class ChestObjectStorage(ObjectStorage):
+#     def __init__(self, root_dir: Path) -> None:
+#         self._root_dir = root_dir
+#         self._root_dir.mkdir(parents=True, exist_ok=True)
+
+#     def save(self, namespace: Namespace) -> TimeId:
+#         tid = step_time_id()
+#         db = Chest(path=self.db_path(tid), dump=podpickle.dump, load=podpickle.load)
+#         for name, obj in namespace.items():
+#             db[name] = obj
+#         db.flush()
+#         return tid
+
+#     def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
+#         db = Chest(path=self.db_path(tid), dump=podpickle.dump, load=podpickle.load)
+#         if nameset is None:
+#             nameset = set(db.keys())
+#         return {name: db[name] for name in nameset if name in db}
+
+#     def estimate_size(self) -> int:
+#         return sum(f.stat().st_size for f in self._root_dir.glob("**/*") if f.is_file())
+
+#     def db_path(self, tid: TimeId) -> str:
+#         return str(self._root_dir / f"t{tid}")
+
+
+""" ZODB namespace storage """
+
+
+class ZODBObjectStorage(ObjectStorage):
+    def __init__(self, root_dir: Path) -> None:
+        self._root_dir = root_dir
+        self._root_dir.mkdir(parents=True, exist_ok=True)
+        self._storage = ZODB.FileStorage.FileStorage(self.db_path())
+        self._db = ZODB.DB(self._storage, large_record_size=1e12)
+        self._txn = ZODB_transaction.TransactionManager()
+        self._db.setHistoricalTimeout(86400)  # 1 day
+
+        # HACK: Should be written to storage.
+        self._tid_p_serial: Dict[int, bytes] = {}
+
+    def save(self, namespace: Namespace) -> TimeId:
+        tid = step_time_id()
+        connection = self._db.open(transaction_manager=self._txn)
+        root = connection.root()
+        for name, obj in namespace.items():
+            root[name] = obj
+        self._txn.commit()
+        self._tid_p_serial[tid] = root._p_serial
+        connection.close()
+        return tid
+
+    def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
+        p_serial = self._tid_p_serial[tid]
+        db = ZODB.DB(self._storage, large_record_size=1e12)  # New db to clear cache for benchmark.
+        connection = db.open(transaction_manager=self._txn, at=p_serial)
+        root = connection.root()
+        if nameset is None:
+            nameset = set(root.keys())
+        loaded_namespace = {name: root[name] for name in nameset if name in root}
+        connection.close()
+        return loaded_namespace
+
+    def estimate_size(self) -> int:
+        return sum(f.stat().st_size for f in self._root_dir.glob("**/*") if f.is_file())
+
+    def db_path(self) -> str:
+        return str(self._root_dir / "zodb.fs")
+
+
+class ZODBSplitObjectStorage(ObjectStorage):
+    def __init__(self, root_dir: Path) -> None:
+        self._root_dir = root_dir
+        self._root_dir.mkdir(parents=True, exist_ok=True)
+
+    def save(self, namespace: Namespace) -> TimeId:
+        tid = step_time_id()
+        storage = ZODB.FileStorage.FileStorage(self.db_path(tid))
+        db = ZODB.DB(storage, large_record_size=1e12)
+        connection = db.open()
+        root = connection.root()
+        for name, obj in namespace.items():
+            root[name] = obj
+        ZODB_transaction.commit()
+        connection.close()
+        return tid
+
+    def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
+        storage = ZODB.FileStorage.FileStorage(self.db_path(tid))
+        db = ZODB.DB(storage, large_record_size=1e12)
+        connection = db.open()
+        root = connection.root()
+        if nameset is None:
+            nameset = set(root.keys())
+        loaded_namespace = {name: root[name] for name in nameset if name in root}
+        connection.close()
+        return loaded_namespace
+
+    def estimate_size(self) -> int:
+        return sum(f.stat().st_size for f in self._root_dir.glob("**/*") if f.is_file())
+
+    def db_path(self, tid: TimeId) -> str:
+        return str(self._root_dir / f"zodb_{tid}.fs")
+
+
 """ Pod namespace storage """
 
 
@@ -120,6 +328,7 @@ class PodObjectStorage(ObjectStorage):
     def __init__(self, pickling: PodPickling, active_filter: bool = True) -> None:
         self._pickling = pickling
         self._active_filter = active_filter
+        self._name_rank: Dict[str, int] = {}
 
     @staticmethod
     def new(pod_dir: Path) -> PodObjectStorage:
@@ -158,6 +367,7 @@ class PodObjectStorage(ObjectStorage):
 
         if self._active_filter and isinstance(namespace, PodNamespace):
             active_names = self._connected_active_names(tid, namespace)
+            logger.warning(f"{active_names=}")
             prev_namemap = namespace.pod_namemap()
             active_namemap = {
                 name: PodId(tid, id(dict.__getitem__(namespace, name))) for name in namespace.keys() if name in active_names
@@ -165,14 +375,20 @@ class PodObjectStorage(ObjectStorage):
             inactive_namemap = {name: prev_namemap[name] for name in namespace.keys() if name not in active_names}
             namemap = {**active_namemap, **inactive_namemap}  # Should contain exactly all names in namespace.
         else:
-            namemap = {name: PodId(tid, id(obj)) for name, obj in namespace.items()}
+            namemap = {name: PodId(tid, id(obj)) for name, obj in dict.items(namespace)}
+        for name in namemap.keys():
+            if name not in self._name_rank:
+                self._name_rank[name] = len(self._name_rank)
         return namemap_pid, namemap
 
     def _load_namemap(self, tid: TimeId) -> Namemap:
         return self._pickling.load(PodId(tid, PodObjectStorage.NAMEMAP_OID))
 
     def _save_objects(self, tid: TimeId, namespace: Namespace, namemap_pid: PodId, namemap: Namemap) -> None:
-        new_namepids = sorted([(name, pid) for name, pid in namemap.items() if pid.tid == tid], key=lambda npid: npid[0])
+        new_namepids = sorted(
+            [(name, pid) for name, pid in namemap.items() if pid.tid == tid],
+            key=lambda npid: self._name_rank[npid[0]],
+        )
         podspace = {pid: dict.__getitem__(namespace, name) for name, pid in new_namepids}
         with self._pickling.dump_batch({namemap_pid: namemap_pid, **podspace}) as dump_session:
             dump_session.dump(namemap_pid, namemap)
@@ -298,7 +514,8 @@ class AsyncPodSaveThread(threading.Thread):
         }
         self._active_names = {name for name, pid in self._namemap.items() if pid.tid == self._tid}
         self._active_name_pids = sorted(
-            [(name, pid) for name, pid in self._namemap.items() if pid.tid == self._tid], key=lambda npid: npid[0]
+            [(name, pid) for name, pid in self._namemap.items() if pid.tid == self._tid],
+            key=lambda npid: self._pod_storage._name_rank[npid[0]],
         )
 
         self._run_barrier = threading.Barrier(2, timeout=5)  # This should be quick (<1 second).
