@@ -16,7 +16,6 @@ import dill
 import transaction as ZODB_transaction
 import ZODB
 import ZODB.FileStorage
-from loguru import logger
 
 from pod.common import Object, PodId, TimeId, step_time_id
 from pod.pickling import ManualPodding, PodPickling, SnapshotPodPickling, StaticPodPickling
@@ -367,7 +366,7 @@ class PodObjectStorage(ObjectStorage):
 
         if self._active_filter and isinstance(namespace, PodNamespace):
             active_names = self._connected_active_names(tid, namespace)
-            logger.warning(f"{active_names=}")
+            # logger.warning(f"{active_names=}")
             prev_namemap = namespace.pod_namemap()
             active_namemap = {
                 name: PodId(tid, id(dict.__getitem__(namespace, name))) for name in namespace.keys() if name in active_names

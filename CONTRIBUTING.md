@@ -1,6 +1,6 @@
 # How to develop on this project
 
-pod welcomes contributions from the community.
+chipmink welcomes contributions from the community.
 
 **You need PYTHON3!**
 
