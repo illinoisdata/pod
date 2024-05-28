@@ -314,7 +314,7 @@ class FilePodStorageWriter(PodWriter):
             self.storage.update_index(self.new_pid_index)
         if len(self.new_pid_synonyms) > 0:
             self.storage.update_pid_synonym(self.new_pid_synonyms)
-        logger.warning(f"memo_size= {self.storage.pod_bytes_memo.size}")
+        # logger.warning(f"memo_size= {self.storage.pod_bytes_memo.size}")
 
 
 class FilePodStorageReader(PodReader):
