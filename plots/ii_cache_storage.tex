@@ -1,0 +1,60 @@
+\begin{figure}[t]
+    \centering
+    \begin{tikzpicture}
+    \begin{axis}[
+        height=32mm,
+        width=0.7\linewidth,
+        axis lines=left,
+        xlabel=Thesaurus Capacity $k_{\text{cap}}$ (Bytes),
+        ylabel=Storage (GB),
+        ymajorgrids,
+        % yminorgrids,
+        ymode=log,
+        ymin=0.01,
+        ymax=90,
+        log origin=infty,
+        ytick={0.01, 0.1, 1, 10, 100, 1000},
+        xmode=log,
+        xmin=0.0005,
+        xmax=2000,
+        % enlarge x limits=0.1,
+        xmajorgrids,
+        xtick={0.001, 0.01, 0.1, 1, 10, 100, 1000},
+        % xticklabels={, $10^{-2}$, $10^{-1}$, $10^{0}$, $10^{1}$, $10^{2}$, $10^{3}$},
+        xticklabels={, $10^{1}$, $10^{2}$, $10^{3}$, $10^{4}$, $10^{5}$, $10^{6}$},
+        every tick label/.append style={font=\small},
+        nodes near coords,
+        point meta=explicit symbolic,
+        nodes near coords style={align=left, rotate=90, anchor=west},
+        legend columns=1,
+        legend style={
+            at={(1.05,0.0)},anchor=south west,align=left,
+            nodes={scale=0.75, transform shape}
+        },
+        reverse legend,
+    ]
+        \draw[thick, color=black] 
+        (axis cs:0.002, 0.01) -- (axis cs:0.002, 25);
+        \node[align=center, anchor=south] (zerolabel) at (0.006, 15) {\scriptsize $k_{\text{cap}} = 0$};
+
+        % \draw[thick, color=pgacolor] 
+        % (axis cs:1024, 0.01) -- (axis cs:1024, 30);
+        % \node[align=center, anchor=south, text=pgacolor] (systemlabel) at (1024, 20) {\scriptsize Default $k_{\text{cap}}$};
+
+        \addplot[draw=cAmain, mark=*, mark options={draw=cAmain, fill=cAlight, scale=0.75}] table [x=cache_size,y=betterxb_storage_gb] {\tableexpiicache};
+        \addlegendentry{\betterxb}
+        \addplot[draw=cCmain, mark=square*, mark options={draw=cCmain, fill=cClight, scale=0.75}] table [x=cache_size,y=skltweet_storage_gb] {\tableexpiicache};
+        \addlegendentry{\skltweet}
+        \addplot[draw=cBmain, mark=diamond*, mark options={draw=cBmain, fill=cBlight, scale=0.75}] table [x=cache_size,y=tpsmay22_storage_gb] {\tableexpiicache};
+        \addlegendentry{\tpsmay}
+        \addplot[draw=cGmain, mark=x, mark options={draw=cGmain, fill=cGlight, scale=0.75}] table [x=cache_size,y=twittnet_storage_gb] {\tableexpiicache};
+        \addlegendentry{\twittnet}
+        \addplot[draw=cFmain, mark=triangle*, mark options={draw=cFmain, fill=cFlight, scale=0.75}] table [x=cache_size,y=ai4code_storage_gb] {\tableexpiicache};
+        \addlegendentry{\aicode}
+    \end{axis}
+    \end{tikzpicture}
+    \vspace{-3mm}
+    \caption{Higher thesaurus capacity reduces storage usage by detecting more synonymous pods. In these notebooks, storage usage converges with $k_{\text{cap}}$ around 100~KB.}
+    \label{fig:exp_ii_cache_storage}
+    \vspace{\undercaptionspace}
+\end{figure}

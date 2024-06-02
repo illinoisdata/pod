@@ -1,0 +1,180 @@
+\def\subfigwidth{0.49\linewidth}
+\def\subfigheight{32mm}
+\def\xprandtwittnet{2.89}
+\def\xpnvaicode{3.785}
+\def\yfailtop{30}
+\def\yfailtopsave{300}
+
+\begin{figure*}
+    \centering
+    \begin{subfigure}[b]{\linewidth} \centering
+    %% DUMMY PICTURE TO ADD LEGEND.
+        \begin{tikzpicture}
+        \begin{axis}[
+            ybar,
+            ticks=none,
+            height=20mm,
+            width=\linewidth,
+            hide axis,
+            xmin=10,  % Need these limits for some reason...
+            xmax=50,
+            ymin=0,
+            ymax=0.4,
+            area legend,
+            legend columns=-1,
+            legend style={at={(0.0,0.0)},anchor=south,align=center,/tikz/every even column/.append style={column sep=3mm}},
+        ]
+            \node[align=center, opacity=1] {
+                \addlegendimage{barone}
+                \addlegendentry{\bundle}
+                \addlegendimage{bartwo}
+                \addlegendentry{\pnv}
+                \addlegendimage{barthree}
+                \addlegendentry{\prand}
+                \addlegendimage{barfour}
+                \addlegendentry{\pfl}
+                \addlegendimage{barfive}
+                \addlegendentry{\pgz}
+                \addlegendimage{barsix}
+                \addlegendentry{\pgi}
+                \addlegendimage{barmain}
+                \addlegendentry{\pglga (Ours)}
+            };
+        \end{axis}
+        \end{tikzpicture}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            height=\subfigheight,
+            width=1.0\linewidth,
+            ybar,
+            bar width=0.057,
+            axis lines=left,
+            % xlabel=Number of Objects,
+            ylabel=Storage (GB),
+            ymajorgrids,
+            % yminorgrids,
+            % xmin=1000,
+            % xmax=40000000,
+            ymode=log,
+            ymin=0.01,
+            ymax=200,
+            log origin=infty,
+            enlarge x limits=0.15,
+            ytick={0.01, 0.1, 1, 10, 100, 1000},
+            xtick={data},
+            xticklabels from table={\tableexpi}{nb},
+            % x tick label style={rotate=20, anchor=north},
+            nodes near coords,
+            point meta=explicit symbolic,
+            nodes near coords style={align=left, rotate=90, anchor=west},
+            legend columns=7,
+            legend style={
+                at={(0.02,1.0)},anchor=north west,
+                legend style={nodes={scale=0.65, transform shape}},
+            },
+            legend cell align={left},
+        ]
+            \addplot[barone] table [x=index,y=pnb_storage_gb] {\tableexpi};
+            % \addlegendentry{\bundle}
+    
+            \addplot[bartwo] table [x=index,y=pnv_storage_gb] {\tableexpi};
+            % \addlegendentry{\pnv}
+            \addplot[barthree] table [x=index,y=prand_storage_gb] {\tableexpi};
+            % \addlegendentry{\prand}
+    
+            \addplot[barfour] table [x=index,y=pfl_storage_gb] {\tableexpi};
+            % \addlegendentry{\pfl}
+    
+            \addplot[barfive] table [x=index,y=pg0_storage_gb] {\tableexpi};
+            % \addlegendentry{\pgz}
+            \addplot[barsix] table [x=index,y=pg1_storage_gb] {\tableexpi};
+            % \addlegendentry{\pgi}
+    
+            \addplot[barmain] table [x=index,y=pga_storage_gb] {\tableexpi};
+            % \addlegendentry{\pglga}
+
+            \draw[thick, dashed, color=cBmain] 
+            (axis cs:\xprandtwittnet, 0.01) -- (axis cs:\xprandtwittnet, \yfailtop);
+            \node[cBmain, align=center, rotate=0, anchor=south] at (axis cs:\xprandtwittnet, \yfailtop) {Failed};
+            \draw[thick, dashed, color=cCmain] 
+            (axis cs:\xpnvaicode, 0.01) -- (axis cs:\xpnvaicode, \yfailtop);
+            \node[cCmain, align=center, rotate=0, anchor=south] at (axis cs:\xpnvaicode, \yfailtop) {Failed};
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-3mm}
+        \caption{Total storage size}
+        \label{fig:exp_iii_storage}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \centering
+        \begin{tikzpicture}
+        \begin{axis}[
+            height=\subfigheight,
+            width=1.0\linewidth,
+            ybar,
+            bar width=0.057,
+            axis lines=left,
+            % xlabel=Number of Objects,
+            ylabel=Save Time (s),
+            ymajorgrids,
+            % yminorgrids,
+            % xmin=1000,
+            % xmax=40000000,
+            ymode=log,
+            ymin=0.1,
+            ymax=2000,
+            log origin=infty,
+            ytick={0.1, 1, 10, 100, 1000, 10000, 100000},
+            enlarge x limits=0.15,
+            xtick={data},
+            xticklabels from table={\tableexpi}{nb},
+            % x tick label style={rotate=20, anchor=north},
+            % nodes near coords,
+            % point meta=explicit symbolic,
+            % nodes near coords style={align=left, rotate=90, anchor=west},
+            legend columns=7,
+            legend style={
+                at={(0.02,1.0)},anchor=north west,
+                legend style={nodes={scale=0.65, transform shape}},
+            },
+            legend cell align={left},
+            unbounded coords=jump,
+        ]
+            \addplot[barone] table [x=index,y=pnb_avg_save_s] {\tableexpi};
+            % \addlegendentry{\bundle}
+    
+            \addplot[bartwo] table [x=index,y=pnv_avg_save_s] {\tableexpi};
+            % \addlegendentry{\pnv}  % pnv
+            \addplot[barthree] table [x=index,y=prand_avg_save_s] {\tableexpi};
+            % \addlegendentry{\prand}  % prand
+    
+            \addplot[barfour] table [x=index,y=pfl_avg_save_s] {\tableexpi};
+            % \addlegendentry{\pfl}
+    
+            \addplot[barfive] table [x=index,y=pg0_avg_save_s] {\tableexpi};
+            % \addlegendentry{\pgz}
+            \addplot[barsix] table [x=index,y=pg1_avg_save_s] {\tableexpi};
+            % \addlegendentry{\pgi}
+    
+            \addplot[barmain] table [x=index,y=pga_avg_save_s] {\tableexpi};
+            % \addlegendentry{\pglga}
+
+            \draw[thick, dashed, color=cBmain] 
+            (axis cs:\xprandtwittnet, 0.01) -- (axis cs:\xprandtwittnet, \yfailtopsave);
+            \node[cBmain, align=center, rotate=0, anchor=south] at (axis cs:\xprandtwittnet, \yfailtopsave) {Failed};
+            \draw[thick, dashed, color=cCmain] 
+            (axis cs:\xpnvaicode, 0.01) -- (axis cs:\xpnvaicode, \yfailtopsave);
+            \node[cCmain, align=center, rotate=0, anchor=south] at (axis cs:\xpnvaicode, \yfailtopsave) {Failed};
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-3mm}
+        \caption{Average overhead saving time}
+        \label{fig:exp_iii_save}
+    \end{subfigure}
+    \vspace{-3mm}
+    \caption{\pglga is the most effective podding optimizer in discovering compact podding compared to naive methods (\bundle, \pnv, \prand), manually derived heuristic (\pfl), and \pglga with inacBurate volatility models (\pgz, \pgi).}
+    \label{fig:exp_iii}
+    \vspace{\undercaptionspace}
+\end{figure*}

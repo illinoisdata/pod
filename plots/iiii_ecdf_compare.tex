@@ -1,0 +1,325 @@
+\pgfplotsset{
+    ecdfplot/.style={
+        height=32mm,
+        width=\linewidth,
+        axis lines=left,
+        xlabel=Saving Time (s),
+        ylabel=Percentile,
+        ymajorgrids,
+        % yminorgrids,
+        minor y tick num=1,
+        % ymode=log,
+        ymin=0,
+        ymax=110,
+        % log origin=infty,
+        % ytick={0.0, 0.25, 0.5, 0.75, 1.0},
+        ytick={0, 25, 50, 75, 100},
+        % xmin=0.00009,
+        % xmax=200,
+        % enlarge x limits=0.1,
+        xmajorgrids,
+        % minor x tick num=1,
+        % xtick={0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000},
+        % xticklabels={, $10^{-3}$, , $10^{-1}$, , $10^{1}$, , $10^3$},
+        % nodes near coords,
+        % point meta=explicit symbolic,
+        % nodes near coords style={align=left, rotate=90, anchor=west},
+        % legend columns=1,
+        % legend style={at={(1.05,0.0)},anchor=south west,align=left},
+        % reverse legend,
+        % every axis/.append style={font=\scriptsize},
+    },
+}
+\tikzset{
+    ecdfdill/.style={%
+        % thick,
+        draw=cAmain,
+        mark=x,
+        mark options={
+            draw=cAmain,
+            fill=cAlight,
+            fill opacity=0.0,
+            scale=1.0
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ecdfpglnoavlstatic/.style={%
+        % thick,
+        draw=cZmain,
+        mark=x,
+        mark options={
+            draw=cZmain,
+            fill=cZlight,
+            fill opacity=0.0,
+            scale=1.0
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ecdfpgnoavlstatic/.style={%
+        % thick,
+        draw=cEmain,
+        mark=square*,
+        mark options={
+            draw=cEmain,
+            fill=cElight,
+            fill opacity=0.0,
+            scale=1.0
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ecdfpgnostatic/.style={%
+        % thick,
+        draw=cAmain,
+        mark=diamond*,
+        mark options={
+            draw=cAmain,
+            fill=cAlight,
+            fill opacity=0.0,
+            scale=1.0
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ecdfpgnoavl/.style={%
+        % thick,
+        draw=cBmain,
+        mark=triangle*,
+        mark options={
+            draw=cBmain,
+            fill=cBlight,
+            fill opacity=0.0,
+            scale=1.0
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ecdfpga/.style={%
+        % thick,
+        draw=pgacolor,
+        mark=*,
+        mark options={
+            draw=pgacolor,
+            fill=pgacolorlight,
+            fill opacity=0.0,
+            scale=1.0
+        }
+    },
+    >=LaTeX
+}
+
+\def\subfigwidthwide{0.49\linewidth}
+\def\subfigwidth{0.49\linewidth}
+
+\begin{figure}[t]
+    \centering
+    % \begin{subfigure}[b]{\linewidth} \centering
+    % %% DUMMY PICTURE TO ADD LEGEND.
+    %     \begin{tikzpicture}
+    %     \begin{axis}[
+    %         ticks=none,
+    %         height=20mm,
+    %         width=\linewidth,
+    %         hide axis,
+    %         xmin=10,  % Need these limits for some reason...
+    %         xmax=50,
+    %         ymin=0,
+    %         ymax=0.4,
+    %         legend columns=-1,
+    %         legend style={
+    %             at={(0.0,0.0)},anchor=south,align=center,
+    %             /tikz/every even column/.append style={column sep=2mm},
+    %             legend style={nodes={scale=0.65, transform shape}},
+    %         },
+    %         legend image code/.code={
+    %             \draw[mark repeat=2,mark phase=2]
+    %             plot coordinates {
+    %                 (0cm,0cm)
+    %                 (0.15cm,0cm)        %% default is (0.3cm,0cm)
+    %                 (0.3cm,0cm)         %% default is (0.6cm,0cm)
+    %             };%
+    %         }
+    %     ]
+    %         \node[align=center, opacity=1] {
+    %             % \addlegendimage{ecdfdill}
+    %             % \addlegendentry{\dill}
+    %             \addlegendimage{ecdfpglnoavlstatic}
+    %             \addlegendentry{\pglnoavlstatic}
+    %             \addlegendimage{ecdfpgnoavlstatic}
+    %             \addlegendentry{\pgnoavlstatic}
+    %             \addlegendimage{ecdfpgnostatic}
+    %             \addlegendentry{\pgnostatic}
+    %             \addlegendimage{ecdfpgnoavl}
+    %             \addlegendentry{\pgnoavl}
+    %             \addlegendimage{ecdfpga}
+    %             \addlegendentry{\pga (Ours)}
+    %         };
+    %     \end{axis}
+    %     \end{tikzpicture}
+    % \end{subfigure}
+    % \begin{subfigure}[b]{\subfigwidthwide}
+    %     \begin{tikzpicture}
+    %     \begin{axis}[
+    %         ecdfplot,
+    %         % xmode=log,
+    %         % ylabel=Delay Time (s),
+    %         % xmax=4.5,
+    %         xmax=12,
+    %     ]
+    %         \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbdill};
+    %         % \addlegendentry{\dill}
+    %         \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpglnoavlstatic};
+    %         % \addlegendentry{\pglnoavlstatic}
+    %         \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpgnoavlstatic};
+    %         % \addlegendentry{\pgnoavlstatic}
+    %         \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpgnostatic};
+    %         % \addlegendentry{\pgnostatic}
+    %         \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpgnoavl};
+    %         % \addlegendentry{\pgnoavl}
+    %         \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpga};
+    %         % \addlegendentry{\pga}
+    %     \end{axis}
+    %     \end{tikzpicture}
+    %     \caption{\betterxb}
+    %     \label{fig:exp_iv_ecdf_compare_betterxb}
+    % \end{subfigure}
+    % \begin{subfigure}[b]{\subfigwidth}
+    %     \begin{tikzpicture}
+    %     \begin{axis}[
+    %         ecdfplot,
+    %         % xmode=log,
+    %         % xmax=16,
+    %         xmax=26,
+    %     ]
+    %         \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetdill};
+    %         % \addlegendentry{\dill}
+    %         \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetpglnoavlstatic};
+    %         % \addlegendentry{\pglnoavlstatic}
+    %         \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetpgnoavlstatic};
+    %         % \addlegendentry{\pgnoavlstatic}
+    %         \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetpgnostatic};
+    %         % \addlegendentry{\pgnostatic}
+    %         \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetpgnoavl};
+    %         % \addlegendentry{\pgnoavl}
+    %         \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetpga};
+    %         % \addlegendentry{\pga}
+    %     \end{axis}
+    %     \end{tikzpicture}
+    %     \caption{\skltweet}
+    %     \label{fig:exp_iv_save_skltweet}
+    % \end{subfigure}
+    % \begin{subfigure}[b]{\subfigwidth}
+    %     \begin{tikzpicture}
+    %     \begin{axis}[
+    %         ecdfplot,
+    %         % xmode=log,
+    %         xmax=16,
+    %     ]
+    %         \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaydill};
+    %         % \addlegendentry{\dill}
+    %         \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypglnoavlstatic};
+    %         % \addlegendentry{\pglnoavlstatic}
+    %         \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypgnoavlstatic};
+    %         % \addlegendentry{\pgnoavlstatic}
+    %         \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypgnostatic};
+    %         % \addlegendentry{\pgnostatic}
+    %         \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypgnoavl};
+    %         % \addlegendentry{\pgnoavl}
+    %         \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypga};
+    %         % \addlegendentry{\pga}
+    %     \end{axis}
+    %     \end{tikzpicture}
+    %     \caption{\tpsmay}
+    %     \label{fig:exp_iv_ecdf_compare_tpsmay}
+    % \end{subfigure}
+    % \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ecdfplot,
+            % ymode=log,
+            ymin=20,
+            ymax=110,
+            % log origin=infty,
+            ymajorgrids,
+            % yminorgrids,
+            minor y tick num=1,
+            % ytick={0.0, 0.25, 0.5, 0.75, 1.0},
+            ytick={0, 20, 40, 60, 80, 100},
+            % xmode=log,
+            xmin=0,
+            xmax=36,
+            xmajorgrids,
+            % xminorgrids,
+            minor x tick num=1,
+            xtick={0, 5, 10, 15, 20, 25, 30, 35, 40},
+            legend columns=2,
+            legend style={
+                at={(0.95,0.05)},anchor=south east,align=center,
+                % /tikz/every even column/.append style={column sep=2mm},
+                legend style={nodes={scale=0.75, transform shape}},
+            },
+            % legend image code/.code={
+            %     \draw[mark repeat=2,mark phase=2]
+            %     plot coordinates {
+            %         (0cm,0cm)
+            %         (0.15cm,0cm)        %% default is (0.3cm,0cm)
+            %         (0.3cm,0cm)         %% default is (0.6cm,0cm)
+            %     };%
+            % }
+        ]
+            % \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetdill};
+            % % \addlegendentry{\dill}
+            \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpglnoavlstatic};
+            \addlegendentry{\pglnoavlstatic}
+            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpgnoavlstatic};
+            % \addlegendentry{\pgnoavlstatic}
+            \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpgnostatic};
+            \addlegendentry{\pgnostatic}
+            \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpgnoavl};
+            \addlegendentry{\pgnoavl}
+            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpga};
+            \addlegendentry{\pga}
+
+            \node[draw=black, text=black, fill=white, anchor=north west] at (0.5, 97.0) {\twittnet};
+        \end{axis}
+        \end{tikzpicture}
+    %     \caption{\twittnet}
+    %     \label{fig:exp_iv_ecdf_compare_twittnet}
+    % \end{subfigure}
+    % \begin{subfigure}[b]{\subfigwidth}
+    %     \begin{tikzpicture}
+    %     \begin{axis}[
+    %         ecdfplot, 
+    %         % xmode=log,
+    %         % xmax=2000,
+    %     ]
+    %         % \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfaicodedill};
+    %         % % \addlegendentry{\dill}
+    %         \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfaicodepglnoavlstatic};
+    %         % \addlegendentry{\pglnoavlstatic}
+    %         \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfaicodepgnoavlstatic};
+    %         % \addlegendentry{\pgnoavlstatic}
+    %         \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfaicodepgnostatic};
+    %         % \addlegendentry{\pgnostatic}
+    %         \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfaicodepgnoavl};
+    %         % \addlegendentry{\pgnoavl}
+    %         \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfaicodepga};
+    %         % \addlegendentry{\pga}
+    %     \end{axis}
+    %     \end{tikzpicture}
+    %     \caption{\aicode}
+    %     \label{fig:exp_iv_ecdf_compare_aicode}
+    % \end{subfigure}
+    % \caption{Empirical cumulative distributions (eCDFs) of the durations blocked by \dill vs. \pga across notebooks.}
+    \vspace{-3mm}
+    \caption{With parallel saving, active variable locking (AVL) and allowlist-based static code checker (ASCC) unblocks user's cell executions, improving over synchronous saving.}
+    \label{fig:exp_iv_ecdf_compare}
+    \vspace{\undercaptionspace}
+\end{figure}

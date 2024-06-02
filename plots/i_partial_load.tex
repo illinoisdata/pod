@@ -1,0 +1,255 @@
+\pgfplotsset{
+    ploadplot/.style={
+        height=32mm,
+        width=\linewidth,
+        axis lines=left,
+        xlabel=Cell ID,
+        ylabel=Load Time (s),
+        ymajorgrids,
+        % yminorgrids,
+        minor y tick num=1,
+        % ymode=log,
+        ymin=0.0,
+        % ymax=300,
+        % log origin=infty,
+        % ytick={0.01, 0.1, 1, 10, 100, 1000},
+        % xmode=log,
+        % xmin=0.00009,
+        % xmax=200,
+        % enlarge x limits=0.1,
+        % xmajorgrids,
+        minor x tick num=1,
+        % xtick={0.001, 0.01, 0.1, 1, 10, 100, 1000},
+        % nodes near coords,
+        % point meta=explicit symbolic,
+        % nodes near coords style={align=left, rotate=90, anchor=west},
+        % legend columns=1,
+        % legend style={at={(1.05,0.0)},anchor=south west,align=left},
+        % reverse legend,
+    },
+}
+\tikzset{
+    ploaddill/.style={%
+        draw=dillcolor,
+        mark=x,
+        mark repeat={4},
+        mark options={
+            draw=dillcolor,
+            fill=dillcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadshev/.style={%
+        draw=shevcolor,
+        mark=triangle*,
+        mark repeat={4},
+        mark options={
+            draw=shevcolor,
+            fill=shevcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadzosp/.style={%
+        draw=zospcolor,
+        mark=diamond*,
+        mark repeat={4},
+        mark options={
+            draw=zospcolor,
+            fill=zospcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadzodb/.style={%
+        draw=zodbcolor,
+        mark=square*,
+        mark repeat={4},
+        mark options={
+            draw=zodbcolor,
+            fill=zodbcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadpga/.style={%
+        thick,
+        draw=pgacolor,
+        mark=*,
+        mark repeat={4},
+        mark options={
+            draw=pgacolor,
+            fill=pgacolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+
+\def\subfigwidthwide{0.19\linewidth}
+\def\subfigwidth{0.19\linewidth}
+
+\begin{figure*}[t]
+    \centering
+    \begin{subfigure}[b]{\linewidth} \centering
+    %% DUMMY PICTURE TO ADD LEGEND.
+        \begin{tikzpicture}
+        \begin{axis}[
+            ticks=none,
+            height=20mm,
+            width=\linewidth,
+            hide axis,
+            xmin=10,  % Need these limits for some reason...
+            xmax=50,
+            ymin=0,
+            ymax=0.4,
+            legend columns=-1,
+            legend style={at={(0.0,0.0)},anchor=south,align=center,/tikz/every even column/.append style={column sep=3mm}},
+        ]
+            \node[align=center, opacity=1] {
+                \addlegendimage{ploaddill}
+                \addlegendentry{\dill}
+                \addlegendimage{ploadshev}
+                \addlegendentry{\shev}
+                \addlegendimage{ploadzosp}
+                \addlegendentry{\zosp}
+                \addlegendimage{ploadzodb}
+                \addlegendentry{\zodb}
+                \addlegendimage{ploadpga}
+                \addlegendentry{\pga (Ours)}
+            };
+        \end{axis}
+        \end{tikzpicture}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidthwide}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ploadplot,
+            ylabel=Load Time (s),
+            ymax=2.1,
+        ]
+            \addplot[ploaddill] table [x=tid,y=dill_median_load_s] {\tableexpiploadbetterxb};
+            % \addlegendentry{\dill}
+            \addplot[ploadshev] table [x=tid,y=shev_median_load_s] {\tableexpiploadbetterxb};
+            % \addlegendentry{\shev}
+            \addplot[ploadzosp] table [x=tid,y=zosp_median_load_s] {\tableexpiploadbetterxb};
+            % \addlegendentry{\zosp}
+            \addplot[ploadzodb] table [x=tid,y=zodb_median_load_s] {\tableexpiploadbetterxb};
+            % \addlegendentry{\zodb}
+            \addplot[ploadpga] table [x=tid,y=pga_median_load_s] {\tableexpiploadbetterxb};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\betterxb}
+        \label{fig:exp_i_partial_load_betterxb}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ploadplot,
+            ymax=7,
+        ]
+            \addplot[ploaddill] table [x=tid,y=dill_median_load_s] {\tableexpiploadskltweet};
+            % \addlegendentry{\dill}
+            \addplot[ploadshev] table [x=tid,y=shev_median_load_s] {\tableexpiploadskltweet};
+            % \addlegendentry{\shev}
+            \addplot[ploadzosp] table [x=tid,y=zosp_median_load_s] {\tableexpiploadskltweet};
+            % \addlegendentry{\zosp}
+            \addplot[ploadzodb] table [x=tid,y=zodb_median_load_s] {\tableexpiploadskltweet};
+            % \addlegendentry{\zodb}
+            \addplot[ploadpga] table [x=tid,y=pga_median_load_s] {\tableexpiploadskltweet};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\skltweet}
+        \label{fig:exp_i_partial_load_skltweet}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ploadplot,
+            ymax=14,
+            ytick={0, 2, 4, 6, 8, 10, 12},
+        ]
+            \addplot[ploaddill] table [x=tid,y=dill_median_load_s] {\tableexpiploadtpsmay};
+            % \addlegendentry{\dill}
+            \addplot[ploadshev] table [x=tid,y=shev_median_load_s] {\tableexpiploadtpsmay};
+            % \addlegendentry{\shev}
+            \addplot[ploadzosp] table [x=tid,y=zosp_median_load_s] {\tableexpiploadtpsmay};
+            % \addlegendentry{\zosp}
+            \addplot[ploadzodb] table [x=tid,y=zodb_median_load_s] {\tableexpiploadtpsmay};
+            % \addlegendentry{\zodb}
+            \addplot[ploadpga] table [x=tid,y=pga_median_load_s] {\tableexpiploadtpsmay};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\tpsmay}
+        \label{fig:exp_i_partial_load_tpsmay}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ploadplot,
+            ymax=12,
+            ytick={0, 2, 4, 6, 8, 10},
+        ]
+            \addplot[ploaddill] table [x=tid,y=dill_median_load_s] {\tableexpiploadtwittnet};
+            % \addlegendentry{\dill}
+            \addplot[ploadshev] table [x=tid,y=shev_median_load_s] {\tableexpiploadtwittnet};
+            % \addlegendentry{\shev}
+            \addplot[ploadzosp] table [x=tid,y=zosp_median_load_s] {\tableexpiploadtwittnet};
+            % \addlegendentry{\zosp}
+            \addplot[ploadzodb] table [x=tid,y=zodb_median_load_s] {\tableexpiploadtwittnet};
+            % \addlegendentry{\zodb}
+            \addplot[ploadpga] table [x=tid,y=pga_median_load_s] {\tableexpiploadtwittnet};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\twittnet}
+        \label{fig:exp_i_partial_load_twittnet}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ploadplot,
+            ymax=89,
+        ]
+            \addplot[ploaddill] table [x=tid,y=dill_median_load_s] {\tableexpiploadaicode};
+            % \addlegendentry{\dill}
+            \addplot[ploadshev] table [x=tid,y=shev_median_load_s] {\tableexpiploadaicode};
+            % \addlegendentry{\shev}
+            \addplot[ploadzosp] table [x=tid,y=zosp_median_load_s] {\tableexpiploadaicode};
+            % \addlegendentry{\zosp}
+            \addplot[ploadzodb] table [x=tid,y=zodb_median_load_s] {\tableexpiploadaicode};
+            % \addlegendentry{\zodb}
+            \addplot[ploadpga] table [x=tid,y=pga_median_load_s] {\tableexpiploadaicode};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\aicode}
+        \label{fig:exp_i_partial_load_aicode}
+    \end{subfigure}
+    \vspace{-3mm}
+    \caption{Partial loading time when users are interested in variables accessed at each cell. \pga quickly load target variables proportionally to their individual sizes, whereas some baselines' performance depend on the entire namespace size.}
+    \label{fig:exp_i_partial_load}
+    \vspace{\undercaptionspace}
+\end{figure*}

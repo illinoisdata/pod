@@ -1,0 +1,132 @@
+\def\subfigwidth{0.49\linewidth}
+\def\subfigheight{35mm}
+
+\begin{figure*}[t]
+    \centering
+    \begin{subfigure}[b]{\linewidth} \centering
+    %% DUMMY PICTURE TO ADD LEGEND.
+        \begin{tikzpicture}
+        \begin{axis}[
+            ybar,
+            ticks=none,
+            height=20mm,
+            width=\linewidth,
+            hide axis,
+            xmin=10,  % Need these limits for some reason...
+            xmax=50,
+            ymin=0,
+            ymax=0.4,
+            area legend,
+            legend columns=-1,
+            legend style={at={(0.0,0.0)},anchor=south,align=center,/tikz/every even column/.append style={column sep=3mm}},
+        ]
+            \node[align=center, opacity=1] {
+                \addlegendimage{bardill}
+                \addlegendentry{\dill}
+                \addlegendimage{barshev}
+                \addlegendentry{\shev}
+                \addlegendimage{barzosp}
+                \addlegendentry{\zosp}
+                \addlegendimage{barzodb}
+                \addlegendentry{\zodb}
+                \addlegendimage{barpga}
+                \addlegendentry{\pga (Ours)}
+            };
+        \end{axis}
+        \end{tikzpicture}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            height=\subfigheight,
+            width=1.0\linewidth,
+            ybar,
+            bar width=0.1,
+            axis lines=left,
+            % xlabel=Number of Objects,
+            ylabel=Storage (GB),
+            ymajorgrids,
+            % yminorgrids,
+            % xmin=1000,
+            % xmax=40000000,
+            ymode=log,
+            ymin=0.01,
+            ymax=1500,
+            log origin=infty,
+            enlarge x limits=0.15,
+            ytick={0.01, 0.1, 1, 10, 100, 1000, 10000},
+            xtick={data},
+            xticklabels from table={\tableexpi}{nb},
+            % x tick label style={rotate=20, anchor=north},
+            nodes near coords,
+            point meta=explicit symbolic,
+            nodes near coords style={align=left, rotate=90, anchor=west},
+            legend columns=2,
+            legend style={at={(0.03,1.0)},anchor=north west}
+        ]
+            \addplot[bardill] table [x=index,y=dill_storage_gb] {\tableexpi};
+            % \addlegendentry{\dill}
+            \addplot[barshev] table [x=index,y=shev_storage_gb] {\tableexpi};
+            % \addlegendentry{\shev}
+            \addplot[barzosp] table [x=index,y=zosp_storage_gb] {\tableexpi};
+            % \addlegendentry{\zosp}
+            \addplot[barzodb] table [x=index,y=zodb_storage_gb] {\tableexpi};
+            % \addlegendentry{\zodb}
+            \addplot[barpga] table [x=index,y=pga_storage_gb,meta=pga_rel_storage_gb] {\tableexpi};
+            % \addlegendentry{\pga (Ours)}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-3mm}
+        \caption{Total storage size}
+        \label{fig:exp_i_storage}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            height=\subfigheight,
+            width=1.0\linewidth,
+            ybar,
+            bar width=0.1,
+            axis lines=left,
+            % xlabel=Number of Objects,
+            ylabel=Save Time (s),
+            ymajorgrids,
+            % yminorgrids,
+            % xmin=1000,
+            % xmax=40000000,
+            ymode=log,
+            ymin=0.1,
+            ymax=1500,
+            log origin=infty,
+            enlarge x limits=0.15,
+            ytick={0.1, 1.0, 10, 100, 1000, 10000},
+            xtick={data},
+            xticklabels from table={\tableexpi}{nb},
+            % x tick label style={rotate=20, anchor=north},
+            nodes near coords,
+            point meta=explicit symbolic,
+            nodes near coords style={align=left, rotate=90, anchor=west},
+            legend columns=2,
+            legend style={at={(0.03,1.0)},anchor=north west}
+        ]
+            \addplot[bardill] table [x=index,y=dill_avg_save_s] {\tableexpi};
+            % \addlegendentry{\dill}
+            \addplot[barshev] table [x=index,y=shev_avg_save_s] {\tableexpi};
+            % \addlegendentry{\shev}
+            \addplot[barzosp] table [x=index,y=zosp_avg_save_s] {\tableexpi};
+            % \addlegendentry{\zosp}
+            \addplot[barzodb] table [x=index,y=zodb_avg_save_s] {\tableexpi};
+            % \addlegendentry{\zodb}
+            \addplot[barpga] table [x=index,y=pga_avg_save_s,meta=pga_rel_avg_save_s] {\tableexpi};
+            % \addlegendentry{\pga (Ours)}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-3mm}
+        \caption{Average overhead saving time}
+        \label{fig:exp_i_save}
+    \end{subfigure}
+    \vspace{-3mm}
+    \caption{\pga compactly and quickly stores all variables, 5.7--25.5$\times$ smaller and 1.2--7.4$\times$ faster than the best baselines.}
+    \label{fig:exp_i}
+    \vspace{\undercaptionspace}
+\end{figure*}

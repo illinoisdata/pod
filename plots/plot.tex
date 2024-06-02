@@ -1,0 +1,24 @@
+\documentclass[sigconf,nonacm,screen]{acmart}
+
+\input{macros}
+
+% Read data
+\pgfplotstableread{./exp_i.txt}{\tableexpi}
+\pgfplotstableread{./exp_ii.txt}{\tableexpii}
+\pgfplotstableread{./exp_ii_cache.txt}{\tableexpiicache}
+\pgfplotstableread{./exp_iv.txt}{\tableexpiv}
+\input{exp_i_ploads}
+\input{exp_iv_waits}
+\input{exp_iv_ecdf}
+
+% Make plots
+\begin{document}
+\input{i_save_storage.tex}
+\input{iiii_ecdf.tex}
+\input{i_partial_load.tex}
+\input{ii_avf_save_storage.tex}
+\input{ii_cache_storage.tex}
+\input{iii_save_storage.tex}
+\input{iiii_ecdf_compare.tex}
+\end{document}
+\endinput
