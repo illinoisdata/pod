@@ -4,7 +4,7 @@ At the core to enable notebook version control, environment migrations, and coll
 
 Instead, we aim to develop a new *partial object store* that correctly groups Python objects into pods and detects their changes at pod granularity (historically "pod" stands for partially orered delta).
 
-*Currently this is a research prototype. If you'd like us to productionize it, please let us know (e.g., posting a feature request)*
+*Currently this is a research prototype. If you'd like us to productionize it, please let us know (e.g., posting a feature request)!*
 
 
 ## Quick Start
@@ -22,15 +22,24 @@ ns["x"].append(ns["y"])
 t3 = pod.save(ns)
 
 print(pod.load(t1), pod.load(t2), pod.load(t3))
+
+ns3 = pod.load(t3)
+ns3["x"] = ns3["x"][-1:]
+ns3["y"].clear()
+ns3["y"].append("2")
+print(ns3)  # Change reflects in both "x" and "y"
 ```
 
 ## Reproducibility
 
 All experiments in this work are performed through Docker environment.
 
-Download notebook dataset.
+Download and extract notebook's dataset.
 ```bash
-# TBD: Link and instruction to download dataset
+curl -L https://uofi.box.com/shared/static/yc1b2ryfqrm6pxk8dmzultp6eg1ej18z --output poddata.zip
+unzip poddata.zip
+mkdir nbdata/data2
+mv nbdata/* nbdata/data2/ 2>/dev/null
 ```
 
 Start up a Docker compose on a terminal.
@@ -38,15 +47,17 @@ Start up a Docker compose on a terminal.
 bash experiments/start-all.sh pod_${USER} $(pwd)/nbdata
 ```
 
-On a separate terminal, run all the experiments.
+On a separate terminal, run all the experiments. Measurements will be collected under respective folders in `results`.
 ```bash
 export output=log.txt
 (docker compose -f experiments/docker-compose.yml -p pod_${USER} exec podnogil bash experiments/bench_exp1.sh snp,shev,zosp,zodb,pga,pfl,pfa,pg0,pg1,pgcache0,pgcache0noavf,pgcache0,pgcache4,pgcache16,pgcache64,pgcache256,pgcache1024,pgcache4096,pgcache16384,pgcache65536,pgcache262144,pgcache1048576,pgl,pglnoavlstatic,pglnostatic,pgnoavf,pgnoavl,pgnoavlstatic,pgnostatic,pnb,pnv,prand ai4code,twittnet,skltweet,betterxb,tpsmay22) 2>& 1 | tee -a $output
 unset output
 ```
 
-Measurements will be collected under respective folders in `results`. `plot.ipynb` contains some visualizations and code to format these results for PGFPlots.
-
+Make plots using the following command. `plot.ipynb` also contains some visualizations and code to format the results for PGFPlots.
+```bash
+(cd plots; pdflatex plot.tex; open plot.pdf)
+```
 
 ## Development
 

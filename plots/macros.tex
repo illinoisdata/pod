@@ -1,0 +1,211 @@
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{tikz}
+\usepackage{xspace}
+\usetikzlibrary{calc,positioning,fit}
+\usetikzlibrary{backgrounds}
+\usetikzlibrary{arrows.meta}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.8}
+\usetikzlibrary{patterns}
+\usepgfplotslibrary{statistics}
+\usepgfplotslibrary{colorbrewer}
+\usepgfplotslibrary{fillbetween}
+\usepackage{pgfplotstable}
+
+\usepackage{xcolor}
+\newcommand{\namebase}{Chipmink}
+\newcommand{\name}{\namebase\xspace}
+\newcommand{\system}{\textsf{\namebase}\xspace}
+\newcommand{\datamodel}{\textsf{ObjectGraph}\xspace}
+\newcommand{\podgraph}{\textsf{PodGraph}\xspace}
+\newcommand{\cmark}{\ding{52}\xspace}
+\newcommand{\xmark}{{\color{gray} \ding{55}}\xspace}
+\newcommand{\tmark}{{\color{gray} \scalebox{.7}{\ding{115}}}\xspace}
+
+\newcommand{\dill}{\textsf{Dill}\xspace}
+\newcommand{\shev}{\textsf{Shelve}\xspace}
+\newcommand{\zosp}{\textsf{ZODB}\xspace}
+\newcommand{\zodb}{\textsf{ZODB-Hist}\xspace}
+
+\newcommand{\snp}{\textsf{Snapshot}\xspace}
+\newcommand{\bundle}{\textsf{BundleAll}\xspace}
+\newcommand{\pga}{\system}
+\newcommand{\pgcachez}{\textsf{OnlyAVF}\xspace}
+\newcommand{\pgcacheim}{\textsf{1MB}\xspace}
+\newcommand{\pgcachevzzm}{\textsf{0.5GB}\xspace}
+\newcommand{\pgcacheig}{\textsf{1GB}\xspace}
+\newcommand{\pgcacheiig}{\textsf{2GB}\xspace}
+\newcommand{\pgcacheivg}{\textsf{4GB}\xspace}
+\newcommand{\pgcacheviiig}{\textsf{8GB}\xspace}
+\newcommand{\pgcachexg}{\textsf{10GB}\xspace}
+\newcommand{\pgcachexvig}{\textsf{16GB}\xspace}
+\newcommand{\pgcachecg}{\textsf{100GB}\xspace}
+\newcommand{\pgnoavf}{\textsf{OnlyCD}\xspace}
+\newcommand{\pgcacheznoavf}{\textsf{NoCD/AVF}\xspace}
+\newcommand{\pnv}{\textsf{SplitAll}\xspace}
+\newcommand{\prand}{\textsf{Random}\xspace}
+\newcommand{\pfl}{\textsf{TbH}\xspace}
+\newcommand{\pfa}{\textsf{TbH}\xspace}
+\newcommand{\pgz}{\textsf{LGA-0}\xspace}
+\newcommand{\pgi}{\textsf{LGA-1}\xspace}
+\newcommand{\pglga}{\textsf{LGA}\xspace}
+\newcommand{\pgl}{\textsf{Sync}\xspace}
+\newcommand{\pgnostatic}{\textsf{OnlyAVL}\xspace}
+\newcommand{\pgnoavl}{\textsf{OnlyASCC}\xspace}
+\newcommand{\pgnoavlstatic}{\textsf{NoAVL/ASCC}\xspace}
+\newcommand{\pglnoavlstatic}{\textsf{Sync}\xspace}
+
+\newcommand{\buildats}{\texttt{buildats}\xspace}
+\newcommand{\storesfg}{\texttt{storesfg}\xspace}
+\newcommand{\itsttime}{\texttt{itsttime}\xspace}
+\newcommand{\betterxb}{\texttt{betterxb}\xspace}
+\newcommand{\skltweet}{\texttt{skltweet}\xspace}
+\newcommand{\tpsmay}{\texttt{tpsmay22}\xspace}
+\newcommand{\twittnet}{\texttt{twittnet}\xspace}
+\newcommand{\aicode}{\texttt{ai4code}\xspace}
+
+\newcommand{\pending}[1]{{\color{red} #1}}
+\newcommand*\circled[1]{\tikz[baseline=(char.base)]{
+            \node[shape=circle,fill,inner sep=1pt] (char) {
+            % \footnotesize \bf{ 
+            \textcolor{white}{#1}
+            % }
+            } ;}}
+\settopmatter{printfolios=true}
+\settopmatter{printacmref=true}
+
+\definecolor{Acolor}{HTML}{944003}
+\definecolor{Bcolor}{HTML}{7678ED}
+\definecolor{Ccolor}{HTML}{213F80}
+\definecolor{Dcolor}{HTML}{8ECAE6}
+\definecolor{Ecolor}{HTML}{2A9D8F}
+\definecolor{Fcolor}{HTML}{E9C46A}
+\definecolor{Gcolor}{HTML}{F4A261}
+\definecolor{Hcolor}{HTML}{E76F51}
+
+\definecolor{cAmain}{HTML}{1f77b4}  % blue
+\colorlet{cAlight}{cAmain!25}
+\definecolor{cBmain}{HTML}{ff7f0e}  % orange
+\colorlet{cBlight}{cBmain!25}
+\definecolor{cCmain}{HTML}{2ca02c}  % green
+\colorlet{cClight}{cCmain!25}
+\definecolor{cDmain}{HTML}{d62728}  % red
+\colorlet{cDlight}{cDmain!25}
+\definecolor{cEmain}{HTML}{9467bd}  % purple
+\colorlet{cElight}{cEmain!25}
+\definecolor{cFmain}{HTML}{8c564b}  % brown
+\colorlet{cFlight}{cFmain!25}
+\definecolor{cGmain}{HTML}{e377c2}  % pink
+\colorlet{cGlight}{cGmain!25}
+\definecolor{cZmain}{HTML}{000000}  % black
+\colorlet{cZlight}{cZmain!25}
+\colorlet{cZlightlight}{cZmain!5}
+\definecolor{cPositivemain}{HTML}{2ca02c}  % green
+\colorlet{cPositivelight}{cPositivemain!25}
+\definecolor{cNegativemain}{HTML}{d62728}  % red
+\colorlet{cNegativelight}{cNegativemain!25}
+
+\definecolor{dillcolor}{HTML}{1f77b4}
+\colorlet{dillcolorlight}{dillcolor!25}
+\definecolor{shevcolor}{HTML}{2ca02c}
+\colorlet{shevcolorlight}{shevcolor!25}
+\definecolor{zospcolor}{HTML}{ff7f0e}
+\colorlet{zospcolorlight}{zospcolor!25}
+\definecolor{zodbcolor}{HTML}{e377c2}
+\colorlet{zodbcolorlight}{zodbcolor!25}
+\definecolor{pgacolor}{HTML}{d62728}
+\colorlet{pgacolorlight}{pgacolor!25}
+
+\def\undercaptionspace{0mm}
+\setlength{\textfloatsep}{1mm}
+
+\tikzset{
+    barzero/.style={%
+        draw=cZmain, fill=white,
+        pattern color=cZmain, postaction={pattern=crosshatch},
+    },
+    >=LaTeX
+}
+\tikzset{
+    barone/.style={%
+        draw=cAmain, fill=white,
+        pattern color=cAmain, postaction={pattern=crosshatch},
+    },
+    >=LaTeX
+}
+\tikzset{
+    bartwo/.style={%
+        draw=cCmain, fill=white,
+        pattern color=cCmain, postaction={pattern=crosshatch dots},
+    },
+    >=LaTeX
+}
+\tikzset{
+    barthree/.style={%
+        draw=cBmain, fill=white,
+        pattern color=cBmain, postaction={pattern=north west lines},
+    },
+    >=LaTeX
+}
+\tikzset{
+    barfour/.style={%
+        draw=cGmain, fill=white,
+        pattern color=cGmain, postaction={pattern=north east lines},
+    },
+    >=LaTeX
+}
+\tikzset{
+    barfive/.style={%
+        draw=cFmain, fill=white,
+        pattern color=cFmain, postaction={pattern=grid},
+    },
+    >=LaTeX
+}
+\tikzset{
+    barsix/.style={%
+        draw=cEmain, fill=white,
+        pattern color=cEmain, postaction={pattern=horizontal lines},
+    },
+    >=LaTeX
+}
+\tikzset{
+    barmain/.style={%
+        draw=pgacolor, fill=pgacolorlight,
+        pattern color=pgacolor, postaction={pattern=crosshatch},
+    },
+    >=LaTeX
+}
+
+
+\tikzset{
+    bardill/.style={%
+        barone
+    },
+    >=LaTeX
+}
+\tikzset{
+    barshev/.style={%
+        bartwo
+    },
+    >=LaTeX
+}
+\tikzset{
+    barzosp/.style={%
+        barthree
+    },
+    >=LaTeX
+}
+\tikzset{
+    barzodb/.style={%
+        barfour
+    },
+    >=LaTeX
+}
+\tikzset{
+    barpga/.style={%
+        barmain
+    },
+    >=LaTeX
+}
