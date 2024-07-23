@@ -33,6 +33,16 @@ COPY ./requirements.txt /pod/requirements.txt
 RUN apt-get install libpq-dev libhdf5-dev pkg-config --yes
 RUN python -m pip install -r /pod/requirements.txt
 
+# Install CRIU
+WORKDIR /
+RUN apt install libnet-dev libnl-route-3-dev bsdmainutils build-essential git-core iptables libaio-dev libbsd-dev libcap-dev libgnutls28-dev libgnutls30 libnftables-dev libnl-3-dev libprotobuf-c-dev libprotobuf-dev libselinux-dev iproute2 kmod pkg-config protobuf-c-compiler protobuf-compiler python3-minimal python3-protobuf python3-yaml libdrm-dev gnutls-dev asciidoc --yes
+RUN python -m pip install asciidoc protobuf==3.20.*
+# Or RUN git clone https://github.com/checkpoint-restore/criu.git
+RUN git clone https://github.com/illinoisdata/criu.git
+WORKDIR /criu
+RUN make -j4
+RUN make install
+
 # Install Pod
 COPY ./pod /pod/pod
 COPY ./setup.py /pod/setup.py
@@ -44,4 +54,3 @@ RUN python -m pip install -e .
 RUN make compile
 
 WORKDIR /
-ENTRYPOINT /bin/bash

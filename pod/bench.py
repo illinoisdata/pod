@@ -22,6 +22,7 @@ import pod.storage
 from pod._pod import (
     AsyncPodObjectStorage,
     CloudpickleObjectStorage,
+    CRIUObjectStorage,
     DillObjectStorage,
     Namespace,
     ObjectStorage,
@@ -397,6 +398,18 @@ class SUT:
         elif args.sut == "zosp":
             assert args.pod_dir is not None, "zosp requires --pod_dir"
             return ZODBSplitObjectStorage(args.pod_dir)
+        elif args.sut == "criu":
+            assert args.pod_dir is not None, "criu requires --pod_dir"
+            return CRIUObjectStorage(args.pod_dir, incremental=False, skip_load=True)
+        elif args.sut == "crii":
+            assert args.pod_dir is not None, "crii requires --pod_dir"
+            return CRIUObjectStorage(args.pod_dir, incremental=True, skip_load=True)
+        elif args.sut == "criu-load":
+            assert args.pod_dir is not None, "criu-load requires --pod_dir"
+            return CRIUObjectStorage(args.pod_dir, incremental=False, skip_save=True)
+        elif args.sut == "crii-load":
+            assert args.pod_dir is not None, "crii-load requires --pod_dir"
+            return CRIUObjectStorage(args.pod_dir, incremental=True, skip_save=True)
         else:  # pod suts.
             pickling = SUT.pickling(args)
             if args.sut_async:
@@ -539,6 +552,7 @@ def run_exp1_impl(args: BenchArgs) -> None:
             del loaded_globals
             loaded_globals = None
         gc.collect()
+        time.sleep(1.0)
     expstat.summary()
 
     # No more measurement, re-enable now.
