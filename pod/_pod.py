@@ -5,7 +5,9 @@ Pod storage interface.
 from __future__ import annotations  # isort:skip
 import pod.__pickle__  # noqa, isort:skip
 
+import os
 import shelve
+import signal
 import threading
 import time
 from pathlib import Path
@@ -16,6 +18,12 @@ import dill
 import transaction as ZODB_transaction
 import ZODB
 import ZODB.FileStorage
+from loguru import logger
+
+try:
+    import pycriu
+except ImportError as e:
+    logger.warning(f"Missing pycriu: {e}, but skipping for now")
 
 from pod.common import Object, PodId, TimeId, step_time_id
 from pod.pickling import ManualPodding, PodPickling, SnapshotPodPickling, StaticPodPickling
@@ -273,6 +281,106 @@ class ZODBSplitObjectStorage(ObjectStorage):
 
     def db_path(self, tid: TimeId) -> str:
         return str(self._root_dir / f"zodb_{tid}.fs")
+
+
+""" CRIU namespace storage """
+
+
+class CRIUObjectStorage(ObjectStorage):
+    CRIU_SERVICE_SOCKET = "/criu/criu_service.socket"
+
+    def __init__(
+        self,
+        root_dir: Path,
+        incremental: bool = False,
+        skip_save: bool = False,
+        skip_load: bool = False,
+    ) -> None:
+        # Now require this package.
+        import pycriu  # noqa
+
+        self._root_dir = root_dir
+        self._root_dir.mkdir(parents=True, exist_ok=True)
+        self._incremental = incremental
+        self._skip_save = skip_save
+        self._skip_load = skip_load
+
+    def save(self, _namespace: Namespace) -> TimeId:
+        # CRIU saves the entire process (i.e., the current Python process).
+        tid = step_time_id()
+        if self._skip_save:  # Skipping to reuse previose dump and avoid same PID for experiment.
+            return tid
+        image_dir_fd: Optional[int] = None
+        try:
+            # Open directory.
+            image_dir = self.image_path(tid)
+            image_dir.mkdir(parents=True, exist_ok=True)
+            image_dir_fd = os.open(str(image_dir), os.O_DIRECTORY)
+
+            # Construct CRIU request.
+            c = pycriu.criu()
+            c.use_sk(CRIUObjectStorage.CRIU_SERVICE_SOCKET)
+            c.opts.pid = os.getpid()  # Dump the current process.
+            c.opts.images_dir_fd = image_dir_fd
+            c.opts.shell_job = True
+            c.opts.leave_running = True
+            c.opts.log_level = 4
+            c.opts.log_file = "log_pycriu.txt"
+            if self._incremental:
+                c.opts.track_mem = True  # Required for incremental dumping.
+                if tid > 0:
+                    c.opts.parent_img = str(self.parent_image_path(tid).resolve())
+
+            # Now dump.
+            c.dump()
+        except pycriu.CRIUExceptionExternal as e:
+            if str(e) == "DUMP failed: Error(56): Bad optionsUnknown":
+                logger.error(
+                    "Incremental CRIU failed, possibly because track-mem is not supported. "
+                    "Verify with `criu check --feature mem_dirty_track`."
+                )
+            raise e
+        finally:
+            if image_dir_fd is not None:
+                os.close(image_dir_fd)
+        return tid
+
+    def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
+        if self._skip_load:  # Skipping to reuse previose dump and avoid same PID for experiment.
+            return {}
+        image_dir_fd: Optional[int] = None
+        try:
+            # Open directory.
+            image_dir = self.image_path(tid)
+            image_dir_fd = os.open(str(image_dir), os.O_DIRECTORY)
+
+            # Construct CRIU request.
+            c = pycriu.criu()
+            c.use_sk(CRIUObjectStorage.CRIU_SERVICE_SOCKET)
+            c.opts.images_dir_fd = image_dir_fd
+            c.opts.shell_job = True
+            c.opts.log_level = 4
+            c.opts.log_file = "log_pycriu.txt"
+
+            # Restore.
+            restore_resp = c.restore()
+
+            # Cleanup restored process.
+            os.kill(restore_resp.pid, signal.SIGTERM)
+        finally:
+            if image_dir_fd is not None:
+                os.close(image_dir_fd)
+        return {}  # Ok for experiment but should send the namespace across process.
+
+    def estimate_size(self) -> int:
+        return sum(f.stat().st_size for f in self._root_dir.glob("**/*") if f.is_file())
+
+    def image_path(self, tid: TimeId) -> Path:
+        return self._root_dir / f"t{tid}"
+
+    def parent_image_path(self, tid: TimeId) -> Path:
+        assert tid > 0
+        return self.image_path(tid - 1)
 
 
 """ Pod namespace storage """
