@@ -60,9 +60,7 @@ SUTS=(
     "zodb" 
     "zosp" 
     "criu" 
-    "criu-load"   # Must follow criu
     "crii" 
-    "crii-load"   # Must follow crii
     "imm"
     "pfl"
     "pfa"
@@ -144,12 +142,6 @@ function get_sut_args() {
     elif [[ $_SUT == "crii" ]]
     then
         sut_args="--sut crii --pod_dir ${POD_DIR}"
-    elif [[ $_SUT == "criu-load" ]]
-    then
-        sut_args="--sut criu-load --pod_dir ${POD_DIR}"
-    elif [[ $_SUT == "crii-load" ]]
-    then
-        sut_args="--sut crii-load --pod_dir ${POD_DIR}"
     elif [[ $_SUT == "imm" ]]
     then
         sut_args="--sut inmem_dict"
@@ -337,12 +329,6 @@ function prepare_sut() {
     elif [[ $_SUT == "crii" ]]
     then
         rm -r ${POD_DIR}
-    elif [[ $_SUT == "criu-load" ]]
-    then
-        echo "Reusing previous checkpoints at ${POD_DIR}"
-    elif [[ $_SUT == "crii-load" ]]
-    then
-        echo "Reusing previous checkpoints at ${POD_DIR}"
     elif [[ $_SUT == "imm" ]]
     then
         :
