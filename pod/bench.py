@@ -400,16 +400,10 @@ class SUT:
             return ZODBSplitObjectStorage(args.pod_dir)
         elif args.sut == "criu":
             assert args.pod_dir is not None, "criu requires --pod_dir"
-            return CRIUObjectStorage(args.pod_dir, incremental=False, skip_load=True)
+            return CRIUObjectStorage(args.pod_dir, incremental=False)
         elif args.sut == "crii":
             assert args.pod_dir is not None, "crii requires --pod_dir"
-            return CRIUObjectStorage(args.pod_dir, incremental=True, skip_load=True)
-        elif args.sut == "criu-load":
-            assert args.pod_dir is not None, "criu-load requires --pod_dir"
-            return CRIUObjectStorage(args.pod_dir, incremental=False, skip_save=True)
-        elif args.sut == "crii-load":
-            assert args.pod_dir is not None, "crii-load requires --pod_dir"
-            return CRIUObjectStorage(args.pod_dir, incremental=True, skip_save=True)
+            return CRIUObjectStorage(args.pod_dir, incremental=True)
         else:  # pod suts.
             pickling = SUT.pickling(args)
             if args.sut_async:

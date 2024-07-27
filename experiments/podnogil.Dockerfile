@@ -42,11 +42,6 @@ RUN wget -qO- https://www.mongodb.org/static/pgp/server-7.0.asc | tee /etc/apt/t
 RUN apt-get update
 RUN apt-get install mongodb-mongosh --yes
 
-# Install requirements first to improve cachings
-COPY ./requirements.txt /pod/requirements.txt
-RUN apt-get install libpq-dev libhdf5-dev pkg-config --yes
-RUN python -m pip install -r /pod/requirements.txt
-
 # Install CRIU
 WORKDIR /
 RUN apt install libnet-dev libnl-route-3-dev bsdmainutils build-essential git-core iptables libaio-dev libbsd-dev libcap-dev libgnutls28-dev libgnutls30 libnftables-dev libnl-3-dev libprotobuf-c-dev libprotobuf-dev libselinux-dev iproute2 kmod pkg-config protobuf-c-compiler protobuf-compiler python3-minimal python3-protobuf python3-yaml libdrm-dev gnutls-dev asciidoc --yes
@@ -58,6 +53,11 @@ RUN make -j4
 RUN make install
 RUN make PREFIX=/build/ install-criu
 RUN python -m pip install  ./lib
+
+# Install requirements first to improve cachings
+COPY ./requirements.txt /pod/requirements.txt
+RUN apt-get install libpq-dev libhdf5-dev pkg-config --yes
+RUN python -m pip install -r /pod/requirements.txt
 
 # Install Pod
 COPY ./pod /pod/pod

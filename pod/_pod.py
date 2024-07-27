@@ -15,6 +15,7 @@ from typing import Dict, Optional, Set, Tuple
 
 import cloudpickle
 import dill
+import multiprocess
 import transaction as ZODB_transaction
 import ZODB
 import ZODB.FileStorage
@@ -288,28 +289,33 @@ class ZODBSplitObjectStorage(ObjectStorage):
 
 class CRIUObjectStorage(ObjectStorage):
     CRIU_SERVICE_SOCKET = "/criu/criu_service.socket"
+    CRIU_NSP_REQUEST = "nsp_req"
+    CRIU_NSP_RESPONSE = "nsp_resp"
 
     def __init__(
         self,
         root_dir: Path,
         incremental: bool = False,
-        skip_save: bool = False,
-        skip_load: bool = False,
     ) -> None:
         # Now require this package.
         import pycriu  # noqa
 
+        # Force spawning to avoid frozen (e.g., on xgb) and failed (PicklingError) restores.
+        multiprocess.set_start_method("spawn", force=True)
+
         self._root_dir = root_dir
         self._root_dir.mkdir(parents=True, exist_ok=True)
         self._incremental = incremental
-        self._skip_save = skip_save
-        self._skip_load = skip_load
 
-    def save(self, _namespace: Namespace) -> TimeId:
-        # CRIU saves the entire process (i.e., the current Python process).
+    def save(self, namespace: Namespace) -> TimeId:
+        # Fork into a nsp that waits to serve namespace
         tid = step_time_id()
-        if self._skip_save:  # Skipping to reuse previose dump and avoid same PID for experiment.
-            return tid
+        request_fifo = self.nsp_request_fifo(tid)
+        os.mkfifo(request_fifo)  # Receiving. Need to make it here to avoid race condition.
+        nsp = multiprocess.Process(target=self.serve_namespace, args=(tid, namespace))
+        nsp.start()
+
+        # Save the nsp that holds the namespace
         image_dir_fd: Optional[int] = None
         try:
             # Open directory.
@@ -320,10 +326,9 @@ class CRIUObjectStorage(ObjectStorage):
             # Construct CRIU request.
             c = pycriu.criu()
             c.use_sk(CRIUObjectStorage.CRIU_SERVICE_SOCKET)
-            c.opts.pid = os.getpid()  # Dump the current process.
+            c.opts.pid = nsp.pid
             c.opts.images_dir_fd = image_dir_fd
             c.opts.shell_job = True
-            c.opts.leave_running = True
             c.opts.log_level = 4
             c.opts.log_file = "log_pycriu.txt"
             if self._incremental:
@@ -343,12 +348,14 @@ class CRIUObjectStorage(ObjectStorage):
         finally:
             if image_dir_fd is not None:
                 os.close(image_dir_fd)
+        nsp.join()  # Should be closed by CRIU.
         return tid
 
     def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
-        if self._skip_load:  # Skipping to reuse previose dump and avoid same PID for experiment.
-            return {}
+        # Restore the nsp to continue serving namespace.
         image_dir_fd: Optional[int] = None
+        nsp_pid = None
+        loaded_namespace = None
         try:
             # Open directory.
             image_dir = self.image_path(tid)
@@ -364,13 +371,66 @@ class CRIUObjectStorage(ObjectStorage):
 
             # Restore.
             restore_resp = c.restore()
+            nsp_pid = restore_resp.pid
 
-            # Cleanup restored process.
-            os.kill(restore_resp.pid, signal.SIGTERM)
+            # Request nameset from the nsp.
+            loaded_namespace = self.request_namespace(tid, nameset)
         finally:
             if image_dir_fd is not None:
                 os.close(image_dir_fd)
-        return {}  # Ok for experiment but should send the namespace across process.
+
+            # Close the nsp.
+            if nsp_pid is not None:
+                os.kill(nsp_pid, signal.SIGTERM)
+
+        assert loaded_namespace is not None
+        return loaded_namespace
+
+    def serve_namespace(self, tid: TimeId, namespace: Namespace):
+        try:
+            request_fifo = self.nsp_request_fifo(tid)
+            assert request_fifo.is_fifo()
+
+            while True:  # Continue serving indefinitely.
+                nameset = dill.loads(request_fifo.read_bytes())
+                logger.info(f"[{os.getpid()}] Received {nameset}")
+                if nameset is not None:
+                    loaded_namespace = {name: namespace[name] for name in nameset if name in namespace}
+
+                response_fifo = self.nsp_response_fifo(tid)
+                while not response_fifo.exists():  # Wait until request FIFO is available.
+                    time.sleep(0.1)
+                assert response_fifo.is_fifo()
+                logger.info(f"[{os.getpid()}] Packing {len(loaded_namespace)} objects")
+                raw_loaded_namespace = dill.dumps(loaded_namespace)
+                logger.info(f"[{os.getpid()}] Sending {len(raw_loaded_namespace)} bytes")
+                response_fifo.write_bytes(raw_loaded_namespace)
+                logger.info(f"[{os.getpid()}] Sent {len(raw_loaded_namespace)} bytes successfully")
+        finally:
+            pass
+
+            # NOTE: Do not unlink fifo, otherwise it wouldn't be able to restore again.
+            # logger.info(f"[{os.getpid()}] Unlinking {request_fifo}")
+            # os.unlink(request_fifo)
+        logger.info(f"[{os.getpid()}] Exiting {request_fifo}")
+
+    def request_namespace(self, tid: TimeId, nameset: Optional[Set[str]]) -> Namespace:
+        loaded_namespace = None
+        try:
+            request_fifo = self.nsp_request_fifo(tid)
+            response_fifo = self.nsp_response_fifo(tid)
+            os.mkfifo(response_fifo)  # Receiving.
+            while not request_fifo.exists():  # Wait until request FIFO is available.
+                time.sleep(0.1)
+            assert request_fifo.is_fifo()
+            assert response_fifo.is_fifo()
+
+            request_fifo.write_bytes(dill.dumps(nameset))
+            raw_namespace = response_fifo.read_bytes()
+            loaded_namespace = dill.loads(raw_namespace)
+        finally:
+            os.unlink(response_fifo)
+        return loaded_namespace
 
     def estimate_size(self) -> int:
         return sum(f.stat().st_size for f in self._root_dir.glob("**/*") if f.is_file())
@@ -381,6 +441,12 @@ class CRIUObjectStorage(ObjectStorage):
     def parent_image_path(self, tid: TimeId) -> Path:
         assert tid > 0
         return self.image_path(tid - 1)
+
+    def nsp_request_fifo(self, tid: TimeId) -> Path:
+        return self._root_dir / f"{CRIUObjectStorage.CRIU_NSP_REQUEST}_{tid}"
+
+    def nsp_response_fifo(self, tid: TimeId) -> Path:
+        return self._root_dir / f"{CRIUObjectStorage.CRIU_NSP_RESPONSE}_{tid}"
 
 
 """ Pod namespace storage """

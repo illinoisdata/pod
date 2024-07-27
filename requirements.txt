@@ -21,6 +21,7 @@ lightgbm
 loguru
 matplotlib
 mkdocs
+multiprocess
 mypy
 namex
 nbformat
