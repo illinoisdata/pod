@@ -25,10 +25,12 @@ from pod._pod import (
     CRIUObjectStorage,
     DillObjectStorage,
     Namespace,
+    NoopObjectStorage,
     ObjectStorage,
     PodNamespace,
     PodObjectStorage,
     ShelveObjectStorage,
+    SkipSavingPodObjectStorage,
     SnapshotObjectStorage,
     ZODBObjectStorage,
     ZODBSplitObjectStorage,
@@ -100,6 +102,7 @@ class BenchArgs:
     pod_dir: Optional[Path] = None  # Path to pod storage root directory.
     pod_active_filter: bool = True  # Whether to filter active variables for saving.
     pod_cache_size: int = 32_000_000_000  # Pod thesaurus capacity.
+    pod_noop: bool = False  # Skip saving to measure any execution overhead.
     psql_hostname: str = "localhost"  # Hostname where PostgreSQL server is running.
     psql_port: int = 5432  # Port on the hostname where PostgreSQL server is running.
     redis_hostname: str = "localhost"  # Hostname where Redis server is running.
@@ -404,9 +407,13 @@ class SUT:
         elif args.sut == "crii":
             assert args.pod_dir is not None, "crii requires --pod_dir"
             return CRIUObjectStorage(args.pod_dir, incremental=True)
+        elif args.sut == "noop":
+            return NoopObjectStorage()
         else:  # pod suts.
             pickling = SUT.pickling(args)
-            if args.sut_async:
+            if args.pod_noop:
+                return SkipSavingPodObjectStorage(pickling, args.pod_active_filter, args.always_lock_all)
+            elif args.sut_async:
                 return AsyncPodObjectStorage(pickling, args.pod_active_filter, args.always_lock_all)
             return PodObjectStorage(pickling, args.pod_active_filter)
 

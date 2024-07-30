@@ -55,6 +55,26 @@ class ObjectStorage:
         pass
 
 
+""" No-op __storage__ to measure pure execution """
+
+
+# For experiment measuring pure execution time.
+class NoopObjectStorage(ObjectStorage):
+    def __init__(self) -> None:
+        pass
+
+    def save(self, namespace: Namespace) -> TimeId:
+        pass
+        return step_time_id()
+
+    def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
+        logger.warning("NoopObjectStorage did not save any namespace.")
+        return {}
+
+    def estimate_size(self) -> int:
+        return 0
+
+
 """ Snapshot namespace storage """
 
 
@@ -774,3 +794,17 @@ class AsyncPodObjectStorage(PodObjectStorage):
 
     def instrument(self, expstat: Optional[ExpStat]) -> None:
         self._expstat = expstat
+
+
+# For experiment measuring overhead without saving.
+class SkipSavingPodObjectStorage(AsyncPodObjectStorage):
+    def __init__(self, *args, **kwargs) -> None:
+        AsyncPodObjectStorage.__init__(self, *args, **kwargs)
+
+    def save(self, namespace: Namespace) -> TimeId:
+        tid = step_time_id()
+        return tid
+
+    def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
+        logger.warning("SkipSavingPodObjectStorage did not save any namespace.")
+        return {}
