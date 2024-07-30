@@ -61,6 +61,7 @@ SUTS=(
     "zosp" 
     "criu" 
     "crii" 
+    "noop" 
     "imm"
     "pfl"
     "pfa"
@@ -110,9 +111,9 @@ SUTS=(
     "prd"
     "pnj"
     "pmg"
+    "pgnoop"
     "pflc"
     "prcc"
-
 )
 
 function get_sut_args() {
@@ -142,6 +143,9 @@ function get_sut_args() {
     elif [[ $_SUT == "crii" ]]
     then
         sut_args="--sut crii --pod_dir ${POD_DIR}"
+    elif [[ $_SUT == "noop" ]]
+    then
+        sut_args="--sut noop"
     elif [[ $_SUT == "imm" ]]
     then
         sut_args="--sut inmem_dict"
@@ -289,6 +293,9 @@ function get_sut_args() {
     elif [[ $_SUT == "pmg" ]]
     then
         sut_args="--sut pod_mongo --mongo_hostname podmongo --mongo_port 27017"
+    elif [[ $_SUT == "pgnoop" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --sut_async --pod_noop"
     elif [[ $_SUT == "pflc" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --enable_feature --podding_model manual-collect"
@@ -329,6 +336,9 @@ function prepare_sut() {
     elif [[ $_SUT == "crii" ]]
     then
         rm -r ${POD_DIR}
+    elif [[ $_SUT == "noop" ]]
+    then
+        :
     elif [[ $_SUT == "imm" ]]
     then
         :
@@ -393,6 +403,9 @@ function prepare_sut() {
     then
         echo "mongo \"db.dropDatabase();\""
         mongosh pod --host podmongo --port 27017 --eval "db.dropDatabase();"
+    elif [[ $_SUT == "pgnoop" ]]
+    then
+        rm -r ${POD_DIR}
     elif [[ $_SUT == "pflc" ]]
     then
         rm -r ${POD_DIR}
