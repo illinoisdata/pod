@@ -23,6 +23,10 @@ NB_MAP=(
     "skltweet notebooks/sklearn_tweet_classification.ipynb"
     # "trainlms notebooks/04_training_linear_models.ipynb"
 
+    "agripred notebooks/agricultural-drought-prediction.ipynb"
+    "ecomsmph notebooks/e-comm-data-mining-for-smartphone-products.ipynb"
+    "amexdata notebooks/amex-dataset.ipynb"
+    "msciedaw notebooks/msci-eda-which-makes-sense.ipynb"
 )
 
 # Parse into two arrays.
