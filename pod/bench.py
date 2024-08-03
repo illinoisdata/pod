@@ -472,13 +472,17 @@ def run_exp1_impl(args: BenchArgs) -> None:
         # scalene_profiler.stop()
 
         # Record measurements.
+        storage_b = sut.estimate_size()
         tids.append(tid)
         expstat.add_exec_time(exec_stop_ts - exec_start_ts)
         expstat.add_dump(
             nth=nth,
             time_s=dump_stop_ts - dump_start_ts,
-            storage_b=sut.estimate_size(),
+            storage_b=storage_b,
         )
+        if storage_b > 256e9:  # 256 GB
+            logger.error(f"Storage limit exceeded: {storage_b} bytes")
+            break
 
     # Wait until all background dumps are done.
     dump_start_ts = time.time()
