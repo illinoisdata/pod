@@ -19,16 +19,17 @@ fi
 SUT=$1
 NBNAME=$2
 get_sut_args ${SUT} sut_args
-get_nb_path ${NBNAME} nbpath
+get_nb_path ${NBNAME} nbkey nbpath nbargs
 
 echo "Using SUT=${SUT}, NBNAME=${NBNAME}"
 echo "      sut_args=\"${sut_args}\""
-echo "      nbpath=${nbpath}"
+echo "      nbkey=${nbkey}, nbpath=${nbpath}, nbargs=\"${nbargs}\""
 sleep 1
 
 prepare_sut ${SUT}
 python pod/bench.py exp1 \
     --expname exp1_${SUT}_${NBNAME} \
-    --nbname ${NBNAME} \
+    --nbname ${nbkey} \
     --nb ${nbpath} \
+    ${nbargs} \
     ${sut_args}

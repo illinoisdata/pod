@@ -38,17 +38,63 @@ for ((i = 0; i < ${#NB_MAP[@]}; i++)) do
     NB_PATHS[i]+=${nb_map_elems[1]}
 done
 
+
+function get_nb_args() {
+    local key=$1
+    local val=$2
+    local RET_NBARGS=$3
+    if [[ $key == "exc" ]]
+    then
+        nb_args="--exclude_save_names"
+    else
+        echo "ERROR (get_nb_args): Unknown key= ${key}, with value= ${value}"
+        exit 1
+    fi
+    eval $RET_NBARGS="'${nb_args}'"
+    return 0
+}
+
 # The mapping function.
 function get_nb_path() {
-    local _NBNAME=$1
-    local retVal=$2
+    local nbname=$1
+    local RET_NBKEY=$2
+    local RET_NBPATH=$3
+    local RET_NBARGS=$4
+
+    # Notebook key is everything before `[`.
+    ret_nbkey="${nbname%%\[*}"
+    pairs="${nbname#*$ret_nbkey}"
+
+    # Parse optional flags in each pair of `[`` and `]`.
+    ret_nbargs=""
+    while [[ "$pairs" =~ \[([^\]]*)\](.*) ]]; do
+        pair="${BASH_REMATCH[1]}"
+        pairs="${BASH_REMATCH[2]}"
+
+        # Parse `key` or `key=value`.
+        if [[ "$pair" == *"="* ]]; then
+            # Split the pair into key and value
+            IFS='=' read -r key value <<< "$pair"
+        else
+            # If no '=', treat the key as the entire pair and value as empty
+            key="$pair"
+            value=""
+        fi
+
+        # Map the short name to full argument format.
+        get_nb_args "${key}" "${value}" new_nbargs
+        ret_nbargs="${ret_nbargs} ${new_nbargs}"
+    done
+
     for i in ${!NB_KEYS[@]}; do
-        if [ "${NB_KEYS[$i]}" = "$_NBNAME" ]; then
-            eval $retVal="'${NB_PATHS[$i]}'"
+        if [ "${NB_KEYS[$i]}" = "$ret_nbkey" ]; then
+            eval $RET_NBKEY="'${ret_nbkey}'"
+            eval $RET_NBPATH="'${NB_PATHS[$i]}'"
+            eval $RET_NBARGS="'${ret_nbargs}'"
             return 0
         fi
     done
-    echo "ERROR: Invalid NBNAME $_NBNAME from [ ${NB_KEYS[*]} ]"
+    echo "ERROR: Invalid nb_key $ret_nbkey from [ ${NB_KEYS[*]} ]"
     exit 1
 }
 
