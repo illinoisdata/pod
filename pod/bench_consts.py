@@ -1,5 +1,66 @@
 from typing import Dict, Set
 
+""" Variables to be excluded during saving (e.g., dataset variables). """
+
+EXCLUDED_SAVE_NAMES: Dict[str, Set[str]] = {
+    "rmlist": {
+        "secrets",
+        "random",
+        "lc",
+    },
+    "storesfg": {
+        "train",
+        "test",
+        "stores",
+        "transactions",
+    },
+    "itsttime": set(),
+    "buildats": {
+        "df",
+    },
+    "betterxb": {
+        "census",
+        "train",
+        "test",
+        "sub",
+    },
+    "tpsmay22": {
+        "train",
+        "test",
+        "sub",
+    },
+    "ai4code": {
+        "df",
+        "df_ancestors",
+        "df_orders",
+    },
+    "twittnet": {
+        "tweet_df",
+    },
+    "skltweet": {
+        "df",
+    },
+    "agripred": {
+        "X",
+        "Y",
+    },
+    "ecomsmph": {
+        "data_oct",
+        "data_nov",
+    },
+    "amexdata": {
+        "data",
+        "labels",
+    },
+    "msciedaw": {
+        "df_meta",
+        "df_cite_train_x",
+        "df_cite_test_x",
+        "df_cite_train_y",
+        "df_multi_train_x",
+    },
+}
+
 """ Accessed variables for partial loading. """
 
 # Extracted from supawit/loadnames with pglnostatic.

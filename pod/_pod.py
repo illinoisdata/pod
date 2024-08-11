@@ -35,9 +35,31 @@ Namespace = Dict[str, Object]
 Namemap = Dict[str, PodId]  # Mapping from variable name to a pod ID.
 
 
+class ExperimentNamespace(Namespace):
+    def __init__(self, *args, **kwargs) -> None:
+        dict.__init__(self, *args, **kwargs)
+        self.managed: bool = True
+
+    class ManagedScope:
+        def __init__(self, namespace: ExperimentNamespace, managed: bool) -> None:
+            self._namespace = namespace
+            self._old_managed = self._namespace.managed
+            self._new_managed = managed
+
+        def __enter__(self) -> ExperimentNamespace.ManagedScope:
+            self._namespace.managed = self._new_managed
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+            self._namespace.managed = self._old_managed
+
+    def set_managed(self, managed: bool) -> ExperimentNamespace.ManagedScope:
+        return ExperimentNamespace.ManagedScope(self, managed)
+
+
 class ObjectStorage:
     def new_managed_namespace(self, namespace: Namespace = {}) -> Namespace:
-        return namespace
+        return ExperimentNamespace(namespace)
 
     def save(self, namespace: Namespace) -> TimeId:
         raise NotImplementedError("Abstract method")
@@ -473,12 +495,11 @@ class CRIUObjectStorage(ObjectStorage):
 
 
 # TODO: Filter read-only variables in function scope dict better.
-class PodNamespace(dict):
+class PodNamespace(ExperimentNamespace):
     def __init__(self, *args, **kwargs) -> None:
-        dict.__init__(self, *args, **kwargs)
+        ExperimentNamespace.__init__(self, *args, **kwargs)
         self.active_names: Set[str] = set(self.keys())
         self.namemap: Namemap = {}
-        self.managed: bool = True
 
     def __getitem__(self, name: str) -> Object:
         if self.managed:
@@ -499,9 +520,6 @@ class PodNamespace(dict):
         if self.managed:
             self.active_names = set(self.keys())  # TODO: Use enum for this.
         return dict.items(self)
-
-    def set_managed(self, managed: bool):
-        self.managed = managed
 
     def pod_active_names(self) -> Set[str]:
         return self.active_names

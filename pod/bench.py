@@ -11,7 +11,7 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Generator, List, Optional, Tuple
+from typing import Generator, List, Optional, Set, Tuple, cast
 
 import nbformat
 import numpy as np
@@ -24,10 +24,10 @@ from pod._pod import (
     CloudpickleObjectStorage,
     CRIUObjectStorage,
     DillObjectStorage,
+    ExperimentNamespace,
     Namespace,
     NoopObjectStorage,
     ObjectStorage,
-    PodNamespace,
     PodObjectStorage,
     ShelveObjectStorage,
     SkipSavingPodObjectStorage,
@@ -35,7 +35,7 @@ from pod._pod import (
     ZODBObjectStorage,
     ZODBSplitObjectStorage,
 )
-from pod.bench_consts import PARTIAL_LOAD_NAMES
+from pod.bench_consts import EXCLUDED_SAVE_NAMES, PARTIAL_LOAD_NAMES
 from pod.common import TimeId
 from pod.feature import __FEATURE__
 from pod.memo import MemoPageAllocator
@@ -89,6 +89,7 @@ class BenchArgs:
     exp1_num_loads_per_save: int = 4  # Number of loads to test.
     exp1_partial_load: bool = True  # Whether to test partial loading.
     auto_static_checker: str = "allowlist"  # Code check and automatically declare static cells.
+    exclude_save_names: bool = False  # Whether to exclude selected variable names.
 
     """ Random mutating list """
     rmlist_num_cells: int = 10  # Number of cells.
@@ -240,42 +241,38 @@ class NotebookExecutor:
     def __init__(self, cells: NotebookCells, checker: StaticCodeChecker, the_globals: dict = {}) -> None:
         self.cells = cells
         self.checker = checker
-        self.the_globals: dict = the_globals
+        self.the_globals = cast(ExperimentNamespace, the_globals)
         self.the_globals["__spec__"] = None
         self.the_globals["__builtins__"] = globals()["__builtins__"]
 
     def num_cells(self) -> int:
         return len(self.cells)
 
-    def iter(self) -> Generator[Tuple[NotebookCell, dict, str, str], None, None]:
+    def iter(self) -> Generator[Tuple[NotebookCell, ExperimentNamespace, str, str], None, None]:
         for cell in self.cells.iter():
-            if isinstance(self.the_globals, PodNamespace):
-                self.the_globals.set_managed(False)
-            is_static = self.checker.is_static(cell, self.the_globals)
-            if isinstance(self.the_globals, PodNamespace):
-                self.the_globals.set_managed(True)
+            with self.the_globals.set_managed(False):
+                is_static = self.checker.is_static(cell, self.the_globals)
+                # if is_static:
+                #     logger.info(f"Found static cell\n{cell}")
+                #     with open("staticlines.txt", "a") as ns:
+                #         ns.write(cell + "\n\n_______________\n\n")
+                # else:
+                #     with open("nonstatic.txt", "a") as ns:
+                #         ns.write(cell + "\n\n_______________\n\n")
 
-            if is_static and isinstance(self.the_globals, PodNamespace):
-                # logger.info(f"Found static cell\n{cell}")
-                self.the_globals.set_managed(False)
-            #     with open("staticlines.txt", "a") as ns:
-            #         ns.write(cell + "\n\n_______________\n\n")
-            # else:
-            #     with open("nonstatic.txt", "a") as ns:
-            #         ns.write(cell + "\n\n_______________\n\n")
             stdout, stderr = "", ""
             try:
-                with contextlib.redirect_stdout(io.StringIO()) as stdout_f, contextlib.redirect_stderr(
-                    io.StringIO()
-                ) as stderr_f:
+                with (
+                    contextlib.redirect_stdout(io.StringIO()) as stdout_f,
+                    contextlib.redirect_stderr(io.StringIO()) as stderr_f,
+                    self.the_globals.set_managed(is_static),
+                ):
                     exec(cell, self.the_globals, self.the_globals)
                     stdout = stdout_f.getvalue()
                     stderr = stderr_f.getvalue()
             except Exception:
                 logger.error("Exception while executing...\n" f"{cell}\n" f"...with {traceback.format_exc()}")
                 sys.exit(2)
-            if is_static and isinstance(self.the_globals, PodNamespace):
-                self.the_globals.set_managed(True)
             yield cell, self.the_globals, stdout, stderr
 
 
@@ -293,6 +290,23 @@ class BlockTimeout:
 
     def __exit__(self, type, value, traceback):
         signal.alarm(0)
+
+
+class SelectNamespace:
+    def __init__(self, namespace: ExperimentNamespace, exclude_names: Set[str] = set()):
+        self.namespace = namespace
+        self.exclude_names = exclude_names
+        self.excluded_items: dict = {}
+
+    def __enter__(self):
+        with self.namespace.set_managed(False):
+            for exclude_name in self.exclude_names:
+                if exclude_name in self.namespace:
+                    self.excluded_items[exclude_name] = self.namespace.pop(exclude_name)
+
+    def __exit__(self, type, value, traceback):
+        with self.namespace.set_managed(False):
+            self.namespace.update(self.excluded_items)
 
 
 """ Systems under test """
@@ -439,6 +453,15 @@ def run_exp1_impl(args: BenchArgs) -> None:
     if args.podding_model == "roc-collect":
         RoCFeatureCollectorModel.NAMESPACE = namespace
 
+    # Filter out excluded variable names.
+    excluded_save_names: Set[str] = set()
+    if args.exclude_save_names:
+        if args.nbname in EXCLUDED_SAVE_NAMES:
+            excluded_save_names = EXCLUDED_SAVE_NAMES[args.nbname]
+            logger.info(f"Using excluded save names= {excluded_save_names}")
+        else:
+            raise ValueError(f"Missing excluded save names for nbname= {args.nbname}")
+
     # Load variable names for partial loads.
     if args.nbname in PARTIAL_LOAD_NAMES:
         partial_load_names = PARTIAL_LOAD_NAMES[args.nbname]
@@ -465,11 +488,12 @@ def run_exp1_impl(args: BenchArgs) -> None:
         exec_stop_ts = time.time()
 
         # Dump current state.
-        # scalene_profiler.start()
-        dump_start_ts = time.time()
-        tid = sut.save(the_globals)
-        dump_stop_ts = time.time()
-        # scalene_profiler.stop()
+        with SelectNamespace(the_globals, exclude_names=excluded_save_names):
+            # scalene_profiler.start()
+            dump_start_ts = time.time()
+            tid = sut.save(the_globals)
+            dump_stop_ts = time.time()
+            # scalene_profiler.stop()
 
         # Record measurements.
         storage_b = sut.estimate_size()
