@@ -8,6 +8,7 @@ POD_DIR=/tmp/pod
 
 NB_MAP=(
     "rmlist rmlist"
+    "rmtree rmtree"
 
     "storesfg notebooks/store-sales-ts-forecasting-a-comprehensive-guide.ipynb"
     "itsttime notebooks/it-s-that-time-of-the-year-again.ipynb"
@@ -46,6 +47,18 @@ function get_nb_args() {
     if [[ $key == "exc" ]]
     then
         nb_args="--exclude_save_names"
+    elif [[ $key == "tv" ]]
+    then
+        nb_args="--rmtree_var_size ${val}"
+    elif [[ $key == "tl" ]]
+    then
+        nb_args="--rmtree_list_size ${val}"
+    elif [[ $key == "tml" ]]
+    then
+        nb_args="--rmtree_percent_list_mutate ${val}"
+    elif [[ $key == "tme" ]]
+    then
+        nb_args="--rmtree_percent_elem_mutate ${val}"
     else
         echo "ERROR (get_nb_args): Unknown key= ${key}, with value= ${value}"
         exit 1

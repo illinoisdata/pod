@@ -93,9 +93,17 @@ class BenchArgs:
 
     """ Random mutating list """
     rmlist_num_cells: int = 10  # Number of cells.
-    rmlist_list_size: int = 1000  # Number of elements in the list
+    rmlist_list_size: int = 1000  # Number of elements in the list.
     rmlist_elem_size: int = 100000  # Size of each element in the list.
     rmlist_num_elem_mutate: int = 10  # Number of elements mutating in each cell.
+
+    """ Random mutating tree """
+    rmtree_num_cells: int = 10  # Number of cells.
+    rmtree_var_size: float = 1000  # Number of list variables.
+    rmtree_list_size: float = 1000  # Number of elements in the list.
+    rmtree_elem_size: int = 100  # Size of each element in the list.
+    rmtree_percent_list_mutate: float = 10  # Percentage of list variables mutating in each cell.
+    rmtree_percent_elem_mutate: float = 10  # Percentage of elements mutating in each cell.
 
     """ Pod storage """
     sut_async: bool = False  # Use async SUT.
@@ -212,6 +220,51 @@ class RandomMutatingListCells(NotebookCells):
         return self.num_cells
 
 
+class RandomMutatingTreeCells(NotebookCells):
+    NBFORMAT_VERSION = 4
+
+    def __init__(
+        self,
+        num_cells: int,
+        var_size: int,
+        list_size: int,
+        elem_size: int,
+        percent_list_mutate: float,
+        percent_elem_mutate: float,
+    ) -> None:
+        self.num_cells = num_cells
+        self.var_size = var_size
+        self.list_size = list_size
+        self.elem_size = elem_size
+        self.num_list_mutate = int(var_size * percent_list_mutate / 100)
+        self.num_elem_mutate = int(list_size * percent_elem_mutate / 100)
+
+    def __getitem__(self, idx: int, /) -> NotebookCell:
+        if idx == 0:
+            # First cell, declare an empty list.
+            return (
+                "import secrets\n"
+                "import random\n"
+                f"for idx in range({self.var_size}):\n"
+                "  globals()[f'l_{idx}'] = [\n"
+                f"    secrets.token_bytes({self.elem_size})\n"
+                f"    for idx in range({self.list_size})\n"
+                "  ]"
+            )
+
+        # Mutate elements randomly.
+        return (
+            f"for idx in random.sample(range({self.var_size}), {self.num_list_mutate}):\n"
+            f"  for jdx in random.sample(range({self.list_size}), {self.num_elem_mutate}):\n"
+            "    globals()[f'l_{idx}'][jdx] = (\n"
+            f"      secrets.token_bytes({self.elem_size})\n"
+            "    )"
+        )
+
+    def __len__(self) -> int:
+        return self.num_cells
+
+
 class Notebooks:
     @staticmethod
     def nb(args: BenchArgs) -> NotebookCells:
@@ -221,6 +274,15 @@ class Notebooks:
                 args.rmlist_list_size,
                 args.rmlist_elem_size,
                 args.rmlist_num_elem_mutate,
+            )
+        if args.nb == "rmtree":
+            return RandomMutatingTreeCells(
+                args.rmtree_num_cells,
+                int(args.rmtree_var_size),
+                int(args.rmtree_list_size),
+                args.rmtree_elem_size,
+                args.rmtree_percent_list_mutate,
+                args.rmtree_percent_elem_mutate,
             )
         else:
             notebook_path = Path(args.nb)
@@ -265,7 +327,7 @@ class NotebookExecutor:
                 with (
                     contextlib.redirect_stdout(io.StringIO()) as stdout_f,
                     contextlib.redirect_stderr(io.StringIO()) as stderr_f,
-                    self.the_globals.set_managed(is_static),
+                    self.the_globals.set_managed(not is_static),
                 ):
                     exec(cell, self.the_globals, self.the_globals)
                     stdout = stdout_f.getvalue()
