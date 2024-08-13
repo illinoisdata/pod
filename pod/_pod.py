@@ -5,13 +5,14 @@ Pod storage interface.
 from __future__ import annotations  # isort:skip
 import pod.__pickle__  # noqa, isort:skip
 
+import enum
 import os
 import shelve
 import signal
 import threading
 import time
 from pathlib import Path
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import cloudpickle
 import dill
@@ -27,7 +28,8 @@ except ImportError as e:
     logger.warning(f"Missing pycriu: {e}, but skipping for now")
 
 from pod.common import Object, PodId, TimeId, step_time_id
-from pod.pickling import ManualPodding, PodPickling, SnapshotPodPickling, StaticPodPickling
+from pod.model import FixedDecisionPoddingModel
+from pod.pickling import ManualPodding, ManyPodPickling, PodPickling, SnapshotPodPickling, StaticPodPickling
 from pod.stats import ExpStat
 from pod.storage import FilePodStorage
 
@@ -86,7 +88,8 @@ class NoopObjectStorage(ObjectStorage):
         pass
 
     def save(self, namespace: Namespace) -> TimeId:
-        pass
+        # for _, obj in namespace.items():
+        #     print(type(obj))
         return step_time_id()
 
     def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
@@ -491,6 +494,29 @@ class CRIUObjectStorage(ObjectStorage):
         return self._root_dir / f"{CRIUObjectStorage.CRIU_NSP_RESPONSE}_{tid}"
 
 
+""" Type-explicit storage (WARNING: it does not save all objects.) """
+
+class TypeExplicitEnum(enum.Enum):
+    np_ndarray = 0  # np.save
+    pd_dataframe = 0  # to_parquet
+
+
+
+class TypeExplicitObjectStorage(ObjectStorage):
+    def __init__(self) -> None:
+        pass
+
+    def save(self, namespace: Namespace) -> TimeId:
+        return step_time_id()
+
+    def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
+        logger.warning("TypeExplicitObjectStorage did not save any namespace.")
+        return {}
+
+    def estimate_size(self) -> int:
+        return 0
+
+
 """ Pod namespace storage """
 
 
@@ -826,3 +852,30 @@ class SkipSavingPodObjectStorage(AsyncPodObjectStorage):
     def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
         logger.warning("SkipSavingPodObjectStorage did not save any namespace.")
         return {}
+
+
+""" Exhaustive namespace storage """
+
+
+class ExhaustivePodObjectStorage(PodObjectStorage):
+    def __init__(self, *args, **kwargs) -> None:
+        PodObjectStorage.__init__(self, *args, **kwargs)
+
+    @staticmethod
+    def make_for(num_decisions: int, pod_dir: Path, *args, **kwargs):
+        assert num_decisions <= 30, "Disallow high num_decisions (e.g., inode limit)."
+        if num_decisions >= 20:
+            logger.warning(f"High num_decisions detected. This storage will create {2 ** num_decisions} directories")
+
+        all_picklings: List[PodPickling] = []
+        for d_idx in range(2**num_decisions):
+            storage = FilePodStorage(pod_dir / f"d_{d_idx}")
+            podding_model = FixedDecisionPoddingModel(
+                d_idx,
+                num_decisions,
+                enable_log=d_idx == 2**num_decisions - 1,
+            )
+            pickling = StaticPodPickling(storage, podding_fn=podding_model.podding_fn)
+            all_picklings.append(pickling)
+        many_pickling = ManyPodPickling(all_picklings)
+        return ExhaustivePodObjectStorage(many_pickling)

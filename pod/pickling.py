@@ -115,6 +115,61 @@ class SnapshotPodPickling(PodPickling):
         return self.root_dir / f"{pid.tid}_{pid.oid}.pkl"
 
 
+""" Many: pickling object using many picklings (e.g., exhaustive search) """
+
+
+class ManyPodPicklingDumpSession(PodPicklingDumpSession):
+    def __init__(self, many_pickling: ManyPodPickling, pods: Dict[PodId, Object]) -> None:
+        self.many_pickling = many_pickling
+        self.pods = pods
+
+        self.pickling_batches = [pickling.dump_batch(pods) for pickling in self.many_pickling.picklings]
+
+    def __enter__(self) -> ManyPodPicklingDumpSession:
+        for pickling_batch in self.pickling_batches:
+            pickling_batch.__enter__()
+        return self
+
+    def dump(self, pid: PodId, obj: Object) -> None:
+        for pickling_batch in self.pickling_batches:
+            pickling_batch.dump(pid, obj)
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        for pickling_batch in self.pickling_batches:
+            pickling_batch.__exit__(exc_type, exc_val, exc_tb)
+
+
+class ManyPodPickling(PodPickling):
+    def __init__(self, picklings: List[PodPickling]) -> None:
+        self.picklings = picklings
+
+    def dump(self, obj: Object) -> PodId:
+        tid = step_time_id()
+        pid = PodId(tid, id(obj))
+        with self.dump_batch({pid: obj}) as session:
+            session.dump(pid, obj)
+        return pid
+
+    def dump_batch(self, pods: Dict[PodId, Object]) -> PodPicklingDumpSession:
+        return ManyPodPicklingDumpSession(self, pods)
+
+    def load(self, pid: PodId) -> Object:
+        # Load from the first pickling, because our experiment doesn't cover this part.
+        return self.picklings[0].load(pid)
+
+    def load_batch(self, pids: Set[PodId]) -> Dict[PodId, Object]:
+        # Load from the first pickling, because our experiment doesn't cover this part.
+        return self.picklings[0].load_batch(pids)
+
+    def connected_pods(self) -> Dict[PodId, PodId]:
+        # Find from the first pickling, because our experiment doesn't cover this part.
+        return self.picklings[0].connected_pods()
+
+    def estimate_size(self) -> int:
+        # Minimum supposing we use only that one pickling.
+        return min(pickling.estimate_size() for pickling in self.picklings)
+
+
 """ Pickling objects into pod consistently on object identity """
 
 

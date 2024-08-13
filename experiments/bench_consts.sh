@@ -47,6 +47,9 @@ function get_nb_args() {
     if [[ $key == "exc" ]]
     then
         nb_args="--exclude_save_names"
+    elif [[ $key == "tc" ]]
+    then
+        nb_args="--rmtree_num_cells ${val}"
     elif [[ $key == "tv" ]]
     then
         nb_args="--rmtree_var_size ${val}"
@@ -125,6 +128,7 @@ SUTS=(
     "criu" 
     "crii" 
     "noop" 
+    "exhaust" 
     "imm"
     "pfl"
     "pfa"
@@ -209,6 +213,9 @@ function get_sut_args() {
     elif [[ $_SUT == "noop" ]]
     then
         sut_args="--sut noop"
+    elif [[ $_SUT == "exhaust" ]]
+    then
+        sut_args="--sut exhaust --pod_dir ${POD_DIR}"
     elif [[ $_SUT == "imm" ]]
     then
         sut_args="--sut inmem_dict"
@@ -402,6 +409,9 @@ function prepare_sut() {
     elif [[ $_SUT == "noop" ]]
     then
         :
+    elif [[ $_SUT == "exhaust" ]]
+    then
+        rm -r ${POD_DIR}
     elif [[ $_SUT == "imm" ]]
     then
         :

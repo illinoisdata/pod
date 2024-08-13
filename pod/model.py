@@ -148,6 +148,25 @@ class NaiveBundlePoddingModel(PoddingModel):
         return PodAction.bundle
 
 
+class FixedDecisionPoddingModel(PoddingModel):
+    def __init__(self, decision_string: int, num_decisions: int, enable_log: bool = False) -> None:
+        self._decision_string = decision_string  # Integer represents a string of bits.
+        self._num_decisions = num_decisions
+        self._enable_log = enable_log
+        self._decision_count = 0
+
+    def podding_fn(self, obj: Object, pickler: BasePickler) -> PodAction:
+        if isinstance(obj, (PodId,)):
+            return PodAction.split_final
+        next_decision = self._decision_string % 2
+        self._decision_string = self._decision_string // 2
+        if self._enable_log:
+            self._decision_count += 1
+            if self._decision_count > self._num_decisions:
+                logger.warning(f"Ran out of decision, decision_count= {self._decision_count}")
+        return PodAction.bundle if next_decision == 0 else PodAction.split
+
+
 class ConservativePoddingModel(PoddingModel):
     def __init__(self) -> None:
         self._actions: Dict[ObjectId, PodAction] = {}
