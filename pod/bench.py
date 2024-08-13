@@ -24,6 +24,7 @@ from pod._pod import (
     CloudpickleObjectStorage,
     CRIUObjectStorage,
     DillObjectStorage,
+    ExhaustivePodObjectStorage,
     ExperimentNamespace,
     Namespace,
     NoopObjectStorage,
@@ -122,6 +123,7 @@ class BenchArgs:
     neo4j_database: Optional[str] = None  # Database name to store pod data.
     mongo_hostname: str = "localhost"  # Hostname where MongoDB server is running.
     mongo_port: int = 27017  # Port on the hostname where MongoDB server is running.
+    decision_count: Optional[int] = None  # Number of decisions to be made (exhaustive podding).
 
     """ Learning, model, feature """
     podding_model: str = "manual"  # Model name to use for podding function.
@@ -245,6 +247,7 @@ class RandomMutatingTreeCells(NotebookCells):
             return (
                 "import secrets\n"
                 "import random\n"
+                "random.seed(73)\n"
                 f"for idx in range({self.var_size}):\n"
                 "  globals()[f'l_{idx}'] = [\n"
                 f"    secrets.token_bytes({self.elem_size})\n"
@@ -485,6 +488,13 @@ class SUT:
             return CRIUObjectStorage(args.pod_dir, incremental=True)
         elif args.sut == "noop":
             return NoopObjectStorage()
+        elif args.sut == "exhaust":
+            if args.decision_count is None and args.nb == "rmtree" and args.exclude_save_names:
+                args.decision_count = int(args.rmtree_num_cells * args.rmtree_var_size * (args.rmtree_list_size + 1))
+                logger.info(f"Set decision_count= {args.decision_count}")
+            assert args.decision_count is not None, "exhaust requires --decision_count"
+            assert args.pod_dir is not None, "exhaust requires --pod_dir"
+            return ExhaustivePodObjectStorage.make_for(args.decision_count, args.pod_dir)
         else:  # pod suts.
             pickling = SUT.pickling(args)
             if args.pod_noop:

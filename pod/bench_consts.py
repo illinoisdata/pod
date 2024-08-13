@@ -8,6 +8,14 @@ EXCLUDED_SAVE_NAMES: Dict[str, Set[str]] = {
         "random",
         "lc",
     },
+    "rmtree": {  # Excluding meta variables for exhaustive experiment.
+        "secrets",
+        "random",
+        "__builtins__",
+        "__spec__",
+        "idx",
+        "jdx",
+    },
     "storesfg": {
         "train",
         "test",
