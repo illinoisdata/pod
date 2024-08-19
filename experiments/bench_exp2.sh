@@ -29,7 +29,7 @@ for ((i = 0; i < ${#suts[@]}; i++)) do
             for ((tli = 0; tli < ${#tl_list[@]}; tli++)) do
                 for ((tmli = 0; tmli < ${#tml_list[@]}; tmli++)) do
                     for ((tmei = 0; tmei < ${#tme_list[@]}; tmei++)) do
-                        nb_key="rmtree[exc][tc=${tc_list[$tci]}][tv=${tv_list[$tvi]}][tl=${tl_list[$tvi]}][tml=${tml_list[$tvi]}][tme=${tme_list[$tvi]}]"
+                        nb_key="rmtree[exc][tc=${tc_list[$tci]}][tv=${tv_list[$tvi]}][tl=${tl_list[$tli]}][tml=${tml_list[$tmli]}][tme=${tme_list[$tmei]}]"
                         bash experiments/bench_exp1_nb.sh ${suts[$i]} ${nb_keys[$j]} ${nb_key}
                     done
                 done
