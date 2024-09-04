@@ -169,7 +169,17 @@ if BASE_PICKLE == "dill":
     shelve.Pickler = dill.Pickler  # type: ignore
     shelve.Unpickler = dill.Unpickler  # type: ignore
 
+    zodbpickle.pickle.HIGHEST_PROTOCOL = dill.HIGHEST_PROTOCOL
+    zodbpickle.pickle.DEFAULT_PROTOCOL = dill.DEFAULT_PROTOCOL
     zodbpickle.pickle = dill
+
+    # Must be imported after patching zodbpickle.pickle
+    import ZODB._compat  # noqa: E402
+    import ZODB.serialize  # noqa: E402
+
+    ZODB._compat.HIGHEST_PROTOCOL = dill.HIGHEST_PROTOCOL
+    ZODB._compat._protocol = dill.DEFAULT_PROTOCOL
+    ZODB.serialize._protocol = dill.DEFAULT_PROTOCOL
 
 elif BASE_PICKLE == "cloudpickle":
     # Must be imported after the pickle switch.

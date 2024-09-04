@@ -441,6 +441,8 @@ class CRIUObjectStorage(ObjectStorage):
                 logger.info(f"[{os.getpid()}] Received {nameset}")
                 if nameset is not None:
                     loaded_namespace = {name: namespace[name] for name in nameset if name in namespace}
+                else:
+                    loaded_namespace = namespace
 
                 response_fifo = self.nsp_response_fifo(tid)
                 while not response_fifo.exists():  # Wait until request FIFO is available.
@@ -496,10 +498,10 @@ class CRIUObjectStorage(ObjectStorage):
 
 """ Type-explicit storage (WARNING: it does not save all objects.) """
 
+
 class TypeExplicitEnum(enum.Enum):
     np_ndarray = 0  # np.save
     pd_dataframe = 0  # to_parquet
-
 
 
 class TypeExplicitObjectStorage(ObjectStorage):
@@ -863,7 +865,7 @@ class ExhaustivePodObjectStorage(PodObjectStorage):
 
     @staticmethod
     def make_for(num_decisions: int, pod_dir: Path, *args, **kwargs):
-        assert num_decisions <= 30, "Disallow high num_decisions (e.g., inode limit)."
+        assert num_decisions <= 23, "Disallow high num_decisions (e.g., inode limit)."
         if num_decisions >= 20:
             logger.warning(f"High num_decisions detected. This storage will create {2 ** num_decisions} directories")
 

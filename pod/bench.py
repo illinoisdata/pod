@@ -52,6 +52,7 @@ from pod.model import (
     XGBRegressorRoC,
 )
 from pod.pickling import (
+    CompressedSnapshotPodPickling,
     ManualPodding,
     PoddingFunction,
     PodPickling,
@@ -62,7 +63,15 @@ from pod.pickling import (
 )
 from pod.static import AllowlistStaticCodeChecker, AlwaysNonStaticCodeChecker, StaticCodeChecker
 from pod.stats import ExpStat
-from pod.storage import DictPodStorage, FilePodStorage, MongoPodStorage, Neo4jPodStorage, PostgreSQLPodStorage, RedisPodStorage
+from pod.storage import (
+    CompressedFilePodStorage,
+    DictPodStorage,
+    FilePodStorage,
+    MongoPodStorage,
+    Neo4jPodStorage,
+    PostgreSQLPodStorage,
+    RedisPodStorage,
+)
 
 import pod.__pickle__  # noqa, isort:skip
 
@@ -87,7 +96,7 @@ class BenchArgs:
     seed: int = 123  # Seed for randomization.
 
     """ Exp1: dumps and loads """
-    exp1_num_loads_per_save: int = 4  # Number of loads to test.
+    exp1_num_loads_per_save: int = 1  # Number of loads to test.
     exp1_partial_load: bool = True  # Whether to test partial loading.
     auto_static_checker: str = "allowlist"  # Code check and automatically declare static cells.
     exclude_save_names: bool = False  # Whether to exclude selected variable names.
@@ -108,6 +117,7 @@ class BenchArgs:
 
     """ Pod storage """
     sut_async: bool = False  # Use async SUT.
+    sut_compress: bool = False  # Compress bytes.
     always_lock_all: bool = False  # Always lock all variables (disabling active variable locks).
     pod_dir: Optional[Path] = None  # Path to pod storage root directory.
     pod_active_filter: bool = True  # Whether to filter active variables for saving.
@@ -429,8 +439,18 @@ class SUT:
         elif args.sut == "snapshot":
             assert args.pod_dir is not None, "snapshot requires --pod_dir"
             return SnapshotPodPickling(args.pod_dir)
+        elif args.sut == "snapshotzlib":
+            assert args.pod_dir is not None, "snapshot requires --pod_dir"
+            return CompressedSnapshotPodPickling(args.pod_dir, delta=False)
+        elif args.sut == "snapshotxdelta":
+            assert args.pod_dir is not None, "snapshot requires --pod_dir"
+            return CompressedSnapshotPodPickling(args.pod_dir, delta=True)
         elif args.sut == "pod_file":
             assert args.pod_dir is not None, "pod_file requires --pod_dir"
+            if args.sut_compress:
+                return StaticPodPickling(
+                    CompressedFilePodStorage(args.pod_dir), podding_fn=podding_fn, post_podding_fn=post_podding_fn
+                )
             return StaticPodPickling(FilePodStorage(args.pod_dir), podding_fn=podding_fn, post_podding_fn=post_podding_fn)
         elif args.sut == "pod_psql":
             return StaticPodPickling(
@@ -462,7 +482,7 @@ class SUT:
     @staticmethod
     def sut(args: BenchArgs) -> ObjectStorage:
         pod.storage.POD_CACHE_SIZE = args.pod_cache_size
-        if args.sut == "snapshot":
+        if args.sut in ["snapshot", "snapshotzlib", "snapshotxdelta"]:
             pickling = SUT.pickling(args)
             return SnapshotObjectStorage(pickling)
         elif args.sut == "dill":
@@ -576,7 +596,7 @@ def run_exp1_impl(args: BenchArgs) -> None:
             time_s=dump_stop_ts - dump_start_ts,
             storage_b=storage_b,
         )
-        if storage_b > 256e9:  # 256 GB
+        if storage_b > 768e9:  # 768 GB
             logger.error(f"Storage limit exceeded: {storage_b} bytes")
             break
 
@@ -614,6 +634,8 @@ def run_exp1_impl(args: BenchArgs) -> None:
     # Load random steps.
     loaded_globals: Optional[Namespace] = None
     for nth, tid in enumerate(test_tids):
+        time.sleep(1.0)
+
         # Get load variable names.
         if args.exp1_partial_load:
             load_set = partial_load_names.get(tid, None)
@@ -625,7 +647,7 @@ def run_exp1_impl(args: BenchArgs) -> None:
         # Load state.
         load_start_ts = time.time()
         try:
-            with BlockTimeout(600):
+            with BlockTimeout(2400):
                 loaded_globals = sut.load(tid, nameset=load_set)
         except TimeoutError as e:
             logger.warning(f"{e}")
@@ -653,7 +675,6 @@ def run_exp1_impl(args: BenchArgs) -> None:
             del loaded_globals
             loaded_globals = None
         gc.collect()
-        time.sleep(1.0)
     expstat.summary()
 
     # No more measurement, re-enable now.

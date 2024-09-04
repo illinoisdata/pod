@@ -21,6 +21,7 @@ jupyter
 keras
 lightgbm
 loguru
+lz4
 matplotlib
 mkdocs
 multiprocess
@@ -36,6 +37,7 @@ prophet
 psycopg2
 psycopg2-binary
 pyarrow
+pycryptodome
 pymongo
 pytest-cov
 pywavelets
@@ -57,6 +59,7 @@ transformers
 uri-template
 webcolors
 wordcloud
+xdelta3
 xgboost
 xxhash
 zodb

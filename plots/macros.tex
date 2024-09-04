@@ -1,20 +1,10 @@
-\usepackage{graphicx}
-\usepackage{caption}
-\usepackage{subcaption}
-\usepackage{tikz}
-\usepackage{xspace}
-\usetikzlibrary{calc,positioning,fit}
-\usetikzlibrary{backgrounds}
-\usetikzlibrary{arrows.meta}
-\usepackage{pgfplots}
-\pgfplotsset{compat=1.8}
-\usetikzlibrary{patterns}
-\usepgfplotslibrary{statistics}
-\usepgfplotslibrary{colorbrewer}
-\usepgfplotslibrary{fillbetween}
-\usepackage{pgfplotstable}
-
-\usepackage{xcolor}
+% \newcommand{\name}{\textsf{\textsc{Pod}}\xspace}
+% \newcommand{\name}{\textsf{Pod}\xspace}
+% \newcommand{\name}{\textsf{Peaserver}\xspace}
+% \newcommand{\name}{\textsf{PODS}\xspace}
+% \newcommand{\name}{\textsf{StomtPod}\xspace}
+% \newcommand{\name}{\textsf{NBPost}\xspace}
+% \newcommand{\name}{\textsf{HamStorer}\xspace}
 \newcommand{\namebase}{Chipmink}
 \newcommand{\name}{\namebase\xspace}
 \newcommand{\system}{\textsf{\namebase}\xspace}
@@ -28,10 +18,15 @@
 \newcommand{\shev}{\textsf{Shelve}\xspace}
 \newcommand{\zosp}{\textsf{ZODB}\xspace}
 \newcommand{\zodb}{\textsf{ZODB-Hist}\xspace}
+\newcommand{\criu}{\textsf{CRIU}\xspace}
+\newcommand{\exhaust}{\textsf{Exhaustive}\xspace}
 
 \newcommand{\snp}{\textsf{Snapshot}\xspace}
+\newcommand{\snz}{\textsf{Snapshot-LZ4}\xspace}
+\newcommand{\snx}{\textsf{Snapshot-Xdelta}\xspace}
 \newcommand{\bundle}{\textsf{BundleAll}\xspace}
 \newcommand{\pga}{\system}
+\newcommand{\pgaz}{\system-LZ4\xspace}
 \newcommand{\pgcachez}{\textsf{OnlyAVF}\xspace}
 \newcommand{\pgcacheim}{\textsf{1MB}\xspace}
 \newcommand{\pgcachevzzm}{\textsf{0.5GB}\xspace}
@@ -65,6 +60,9 @@
 \newcommand{\tpsmay}{\texttt{tpsmay22}\xspace}
 \newcommand{\twittnet}{\texttt{twittnet}\xspace}
 \newcommand{\aicode}{\texttt{ai4code}\xspace}
+\newcommand{\agripred}{\texttt{agripred}\xspace}
+\newcommand{\msciedaw}{\texttt{msciedaw}\xspace}
+\newcommand{\ecomsmph}{\texttt{ecomsmph}\xspace}
 
 \newcommand{\pending}[1]{{\color{red} #1}}
 \newcommand*\circled[1]{\tikz[baseline=(char.base)]{
@@ -75,6 +73,39 @@
             } ;}}
 \settopmatter{printfolios=true}
 \settopmatter{printacmref=true}
+
+\newcounter{fixlabelcounter}
+\DeclareRobustCommand{\labelText}[1]{\refstepcounter{fixlabelcounter}\label{#1}}
+\crefname{fixlabelcounter}{Revise}{Revise}
+\Crefname{fixlabelcounter}{Revise}{Revise}
+\newcommand{\fixed}[2]{\protect\labelText{#2}{\color{purple} #1}}
+\newcommand{\fix}[1]{{\color{purple} #1}}
+
+% \makeatletter
+% \newcommand{\labelText}[2]{%
+% #1%
+% \refstepcounter{fixlabelcounter}%
+% \immediate\write\@auxout{%
+%     \string\newlabel{#2}{%
+%         {Revise \number\value{fixlabelcounter}}%
+%         {\thepage}%
+%         % {{\unexpanded{#1}}}%
+%         % {fixlabelcounter.\number\value{fixlabelcounter}}%
+%         % {}%
+%     }%
+% }%
+% }
+% \makeatother
+% \newcommand{\fixed}[2]{\protect\hypertarget{#2}{\textcolor{purple}{#1}}}
+% \newcommand{\fixed}[2]{{\color{purple} #1}}
+
+\newcommand{\todo}[1]{{\color{red} \footnotesize Note: #1}\xspace}
+\newcommand{\maycut}[1]{{\color{orange} #1}\xspace}
+\newcommand{\yongjoo}[1]{{\color{cyan} Yongjoo: #1}}
+\newcommand{\sumay}[1]{{\color{green} Sumay: #1}}
+\newcommand{\billy}[1]{{\color{teal} Billy: #1}}
+\newcommand{\supawit}[1]{{\color{blue} Supawit: #1}}
+\newcommand{\ignore}[1]{{}}
 
 \definecolor{Acolor}{HTML}{944003}
 \definecolor{Bcolor}{HTML}{7678ED}
@@ -99,7 +130,7 @@
 \colorlet{cFlight}{cFmain!25}
 \definecolor{cGmain}{HTML}{e377c2}  % pink
 \colorlet{cGlight}{cGmain!25}
-\definecolor{cZmain}{HTML}{000000}  % black
+\definecolor{cZmain}{HTML}{030303}  % black
 \colorlet{cZlight}{cZmain!25}
 \colorlet{cZlightlight}{cZmain!5}
 \definecolor{cPositivemain}{HTML}{2ca02c}  % green
@@ -114,17 +145,25 @@
 \definecolor{zospcolor}{HTML}{ff7f0e}
 \colorlet{zospcolorlight}{zospcolor!25}
 \definecolor{zodbcolor}{HTML}{e377c2}
+% \definecolor{zodbcolor}{HTML}{8c564b}
 \colorlet{zodbcolorlight}{zodbcolor!25}
+\definecolor{criucolor}{HTML}{9467bd}
+\colorlet{criucolorlight}{criucolor!25}
+\definecolor{exhaustcolor}{HTML}{030303}
+\colorlet{exhaustcolorlight}{exhaustcolor!25}
 \definecolor{pgacolor}{HTML}{d62728}
 \colorlet{pgacolorlight}{pgacolor!25}
 
 \def\undercaptionspace{0mm}
 \setlength{\textfloatsep}{1mm}
 
+\def\normallabelsize{\footnotesize}
+\def\smalllabelsize{\scriptsize}
+
 \tikzset{
     barzero/.style={%
         draw=cZmain, fill=white,
-        pattern color=cZmain, postaction={pattern=crosshatch},
+        pattern color=cZmain, postaction={pattern=grid},
     },
     >=LaTeX
 }
@@ -186,6 +225,18 @@
     >=LaTeX
 }
 \tikzset{
+    barsnz/.style={%
+        bartwo
+    },
+    >=LaTeX
+}
+\tikzset{
+    barsnx/.style={%
+        barthree
+    },
+    >=LaTeX
+}
+\tikzset{
     barshev/.style={%
         bartwo
     },
@@ -200,12 +251,26 @@
 \tikzset{
     barzodb/.style={%
         barfour
+        % draw=cFmain, fill=white,
+        % pattern color=cFmain, postaction={pattern=north east lines},
+    },
+    >=LaTeX
+}
+\tikzset{
+    barcriu/.style={%
+        barsix
     },
     >=LaTeX
 }
 \tikzset{
     barpga/.style={%
         barmain
+    },
+    >=LaTeX
+}
+\tikzset{
+    barpgaz/.style={%
+        barmain, fill=pgacolor
     },
     >=LaTeX
 }

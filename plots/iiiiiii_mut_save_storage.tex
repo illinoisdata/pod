@@ -1,0 +1,217 @@
+\def\subfigwidth{0.49\linewidth}
+\def\subfigheight{30mm}
+
+\pgfplotsset{
+    ploadplot/.style={
+        height=\subfigheight,
+        width=\linewidth,
+        axis lines=left,
+        xlabel=Mutation Fraction (\%),
+        ymajorgrids,
+        % yminorgrids,
+        minor y tick num=1,
+        % ymode=log,
+        ymin=0.0,
+        % ymax=300,
+        % log origin=infty,
+        % ytick={0.01, 0.1, 1, 10, 100, 1000},
+        % xmode=log,
+        % xmin=0.00009,
+        % xmax=200,
+        % enlarge x limits=0.1,
+        % xmajorgrids,
+        minor x tick num=1,
+        % xtick={0.001, 0.01, 0.1, 1, 10, 100, 1000},
+        % nodes near coords,
+        % point meta=explicit symbolic,
+        % nodes near coords style={align=left, rotate=90, anchor=west},
+        % legend columns=1,
+        % legend style={at={(1.05,0.0)},anchor=south west,align=left},
+        % reverse legend,
+        label style={font=\smalllabelsize},
+        every tick label/.append style={font=\smalllabelsize},
+    },
+}
+\tikzset{
+    ploaddill/.style={%
+        draw=dillcolor,
+        mark=x,
+        % mark repeat={4},
+        mark options={
+            draw=dillcolor,
+            fill=dillcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadshev/.style={%
+        draw=shevcolor,
+        mark=triangle*,
+        % mark repeat={4},
+        mark options={
+            draw=shevcolor,
+            fill=shevcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadzosp/.style={%
+        draw=zospcolor,
+        mark=diamond*,
+        % mark repeat={4},
+        mark options={
+            draw=zospcolor,
+            fill=zospcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadzodb/.style={%
+        draw=zodbcolor,
+        mark=square*,
+        % mark repeat={4},
+        mark options={
+            draw=zodbcolor,
+            fill=zodbcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadcriu/.style={%
+        draw=criucolor,
+        mark=pentagon*,
+        % mark repeat={4},
+        mark options={
+            draw=criucolor,
+            fill=criucolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadpga/.style={%
+        thick,
+        draw=pgacolor,
+        mark=*,
+        % mark repeat={4},
+        mark options={
+            draw=pgacolor,
+            fill=pgacolor,
+            % fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+
+\begin{figure}[t]
+    \centering
+    \begin{subfigure}[b]{\linewidth} \centering
+    %% DUMMY PICTURE TO ADD LEGEND.
+        \begin{tikzpicture}
+        \begin{axis}[
+            ticks=none,
+            height=20mm,
+            width=\linewidth,
+            hide axis,
+            xmin=10,  % Need these limits for some reason...
+            xmax=50,
+            ymin=0,
+            ymax=0.4,
+            legend columns=3,
+            legend style={at={(0.0,0.0)},anchor=south,align=center,/tikz/every even column/.append style={column sep=3mm},nodes={scale=0.75, transform shape}},
+        ]
+            \node[align=center, opacity=1] {
+                \addlegendimage{ploaddill}
+                \addlegendentry{\dill}
+                \addlegendimage{ploadshev}
+                \addlegendentry{\shev}
+                \addlegendimage{ploadzosp}
+                \addlegendentry{\zosp}
+                \addlegendimage{ploadzodb}
+                \addlegendentry{\zodb}
+                \addlegendimage{ploadcriu}
+                \addlegendentry{\criu}
+                \addlegendimage{ploadpga}
+                \addlegendentry{\pga (Ours)}
+            };
+        \end{axis}
+        \end{tikzpicture}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ploadplot,
+            ylabel=Storage (GB),
+            ymax=32,
+        ]
+            \addplot[ploaddill] table [x=tml,y=dill_storage_gb] {\tableexpviimr};
+            % \addlegendentry{\dill}
+            \addplot[ploadshev] table [x=tml,y=shev_storage_gb] {\tableexpviimr};
+            % \addlegendentry{\shev}
+            \addplot[ploadzosp] table [x=tml,y=zosp_storage_gb] {\tableexpviimr};
+            % \addlegendentry{\zosp}
+            \addplot[ploadzodb] table [x=tml,y=zodb_storage_gb] {\tableexpviimr};
+            % \addlegendentry{\zodb}
+            \addplot[ploadcriu] table [x=tml,y=criu_storage_gb] {\tableexpviimr};
+            % \addlegendentry{\criu}
+            \addplot[ploadpga] table [x=tml,y=pga_storage_gb] {\tableexpviimr};
+            % \addlegendentry{\pga}
+            
+            \draw[thick, color=black, dotted] 
+            (axis cs:6.5199, 0.0) -- (axis cs:6.5199, 25);
+            \node[align=left, anchor=south west] (nblabel) at (axis cs:0, 23) {\scriptsize Average mutation rate};
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{Total storage size}
+        \label{fig:exp_vii_mr_storage}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ploadplot,
+            ylabel=Saving Time (s),
+            ymax=70,
+        ]
+            \addplot[ploaddill] table [x=tml,y=dill_avg_save_s] {\tableexpviimr};
+            % \addlegendentry{\dill}
+            \addplot[ploadshev] table [x=tml,y=shev_avg_save_s] {\tableexpviimr};
+            % \addlegendentry{\shev}
+            \addplot[ploadzosp] table [x=tml,y=zosp_avg_save_s] {\tableexpviimr};
+            % \addlegendentry{\zosp}
+            \addplot[ploadzodb] table [x=tml,y=zodb_avg_save_s] {\tableexpviimr};
+            % \addlegendentry{\zodb}
+            \addplot[ploadcriu] table [x=tml,y=criu_avg_save_s] {\tableexpviimr};
+            % \addlegendentry{\criu
+            \addplot[ploadpga] table [x=tml,y=pga_avg_save_s] {\tableexpviimr};
+            % \addlegendentry{\pga}
+            
+            \draw[thick, color=black, dotted] 
+            (axis cs:6.5199, 0.0) -- (axis cs:6.5199, 53);
+            \node[align=left, anchor=south west] (nblabel) at (axis cs:0, 50) {\scriptsize Average mutation rate};
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{Average saving time}
+        \label{fig:exp_vii_mr_save}
+    \end{subfigure}
+    \vspace{-3mm}
+    \caption{\fix{Storage and save time when the notebook mutates 1~GB of data over 10 cells at varied rates. Dotted lines displays the mutation fraction averaged over 5 real notebooks.}}
+    \label{fig:exp_vii_mr}
+    \vspace{\undercaptionspace}
+\end{figure}

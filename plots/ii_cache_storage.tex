@@ -10,8 +10,8 @@
         ymajorgrids,
         % yminorgrids,
         ymode=log,
-        ymin=0.01,
-        ymax=90,
+        ymin=0.1,
+        ymax=900,
         log origin=infty,
         ytick={0.01, 0.1, 1, 10, 100, 1000},
         xmode=log,
@@ -34,23 +34,23 @@
         reverse legend,
     ]
         \draw[thick, color=black] 
-        (axis cs:0.002, 0.01) -- (axis cs:0.002, 25);
-        \node[align=center, anchor=south] (zerolabel) at (0.006, 15) {\scriptsize $k_{\text{cap}} = 0$};
+        (axis cs:0.002, 0.01) -- (axis cs:0.002, 250);
+        \node[align=center, anchor=south] (zerolabel) at (0.006, 150) {\scriptsize $k_{\text{cap}} = 0$};
 
         % \draw[thick, color=pgacolor] 
         % (axis cs:1024, 0.01) -- (axis cs:1024, 30);
         % \node[align=center, anchor=south, text=pgacolor] (systemlabel) at (1024, 20) {\scriptsize Default $k_{\text{cap}}$};
 
-        \addplot[draw=cAmain, mark=*, mark options={draw=cAmain, fill=cAlight, scale=0.75}] table [x=cache_size,y=betterxb_storage_gb] {\tableexpiicache};
-        \addlegendentry{\betterxb}
-        \addplot[draw=cCmain, mark=square*, mark options={draw=cCmain, fill=cClight, scale=0.75}] table [x=cache_size,y=skltweet_storage_gb] {\tableexpiicache};
+        \addplot[draw=cAmain, mark=*, mark options={draw=cAmain, fill=cAlight, scale=0.75}] table [x=cache_size,y=skltweet_storage_gb] {\tableexpiicache};
         \addlegendentry{\skltweet}
-        \addplot[draw=cBmain, mark=diamond*, mark options={draw=cBmain, fill=cBlight, scale=0.75}] table [x=cache_size,y=tpsmay22_storage_gb] {\tableexpiicache};
-        \addlegendentry{\tpsmay}
-        \addplot[draw=cGmain, mark=x, mark options={draw=cGmain, fill=cGlight, scale=0.75}] table [x=cache_size,y=twittnet_storage_gb] {\tableexpiicache};
-        \addlegendentry{\twittnet}
-        \addplot[draw=cFmain, mark=triangle*, mark options={draw=cFmain, fill=cFlight, scale=0.75}] table [x=cache_size,y=ai4code_storage_gb] {\tableexpiicache};
+        \addplot[draw=cCmain, mark=square*, mark options={draw=cCmain, fill=cClight, scale=0.75}] table [x=cache_size,y=ai4code_storage_gb] {\tableexpiicache};
         \addlegendentry{\aicode}
+        \addplot[draw=cBmain, mark=diamond*, mark options={draw=cBmain, fill=cBlight, scale=0.75}] table [x=cache_size,y=agripred_storage_gb] {\tableexpiicache};
+        \addlegendentry{\agripred}
+        \addplot[draw=cGmain, mark=x, mark options={draw=cGmain, fill=cGlight, scale=0.75}] table [x=cache_size,y=msciedaw_storage_gb] {\tableexpiicache};
+        \addlegendentry{\msciedaw}
+        \addplot[draw=cFmain, mark=triangle*, mark options={draw=cFmain, fill=cFlight, scale=0.75}] table [x=cache_size,y=ecomsmph_storage_gb] {\tableexpiicache};
+        \addlegendentry{\ecomsmph}
     \end{axis}
     \end{tikzpicture}
     \vspace{-3mm}

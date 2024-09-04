@@ -1,6 +1,6 @@
 \pgfplotsset{
     ecdfplot/.style={
-        height=35mm,
+        height=30mm,
         width=\linewidth,
         axis lines=left,
         xlabel=Save Time (s),
@@ -26,6 +26,8 @@
         % legend columns=1,
         % legend style={at={(1.05,0.0)},anchor=south west,align=left},
         % reverse legend,
+        label style={font=\normallabelsize},
+        every tick label/.append style={font=\normallabelsize},
     },
 }
 \tikzset{
@@ -82,6 +84,21 @@
         mark options={
             draw=zodbcolor,
             fill=zodbcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ecdfcriu/.style={%
+        % thick,
+        draw=criucolor,
+        mark=square*,
+        mark repeat={4},
+        mark options={
+            draw=criucolor,
+            fill=criucolorlight,
             fill opacity=0.0,
             scale=0.75
         }
@@ -156,8 +173,8 @@
         mark repeat={4},
         mark options={
             draw=pgacolor,
-            fill=pgacolorlight,
-            fill opacity=0.0,
+            fill=pgacolor,
+            % fill opacity=0.0,
             scale=0.75
         }
     },
@@ -185,6 +202,7 @@
             legend style={
                 at={(0.0,0.0)},anchor=south,align=center,
                 /tikz/every even column/.append style={column sep=3mm},
+                nodes={scale=0.75, transform shape},
             },
         ]
             \node[align=center, opacity=1] {
@@ -196,6 +214,8 @@
                 \addlegendentry{\zosp}
                 \addlegendimage{ecdfzodb}
                 \addlegendentry{\zodb}
+                \addlegendimage{ecdfcriu}
+                \addlegendentry{\criu}
                 % \addlegendimage{ecdfpglnoavlstatic}
                 % \addlegendentry{\pglnoavlstatic}
                 % \addlegendimage{ecdfpgnoavlstatic}
@@ -210,48 +230,50 @@
         \end{axis}
         \end{tikzpicture}
     \end{subfigure}
-    \begin{subfigure}[b]{\subfigwidthwide}
-        \begin{tikzpicture}
-        \begin{axis}[
-            ecdfplot,
-            % xmode=log,
-            % ylabel=Delay Time (s),
-            % xmax=4.5,
-            xmax=16,
-        ]
-            \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbdill};
-            \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbshev};
-            \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbzosp};
-            \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbzodb};
-            % \addlegendentry{\dill}
-            % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpglnoavlstatic};
-            % % \addlegendentry{\pglnoavlstatic}
-            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpgnoavlstatic};
-            % % \addlegendentry{\pgnoavlstatic}
-            % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpgnostatic};
-            % % \addlegendentry{\pgnostatic}
-            % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpgnoavl};
-            % % \addlegendentry{\pgnoavl}
-            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpga};
-            % \addlegendentry{\pga}
-        \end{axis}
-        \end{tikzpicture}
-        \vspace{-2mm}
-        \caption{\betterxb}
-        \label{fig:exp_iv_ecdf_betterxb}
-    \end{subfigure}
+    % \begin{subfigure}[b]{\subfigwidthwide}
+    %     \begin{tikzpicture}
+    %     \begin{axis}[
+    %         ecdfplot,
+    %         % xmode=log,
+    %         % ylabel=Delay Time (s),
+    %         % xmax=4.5,
+    %         xmax=16,
+    %     ]
+    %         \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbdill};
+    %         \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbshev};
+    %         \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbzosp};
+    %         \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbzodb};
+    %         \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbcriu};
+    %         % \addlegendentry{\dill}
+    %         % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpglnoavlstatic};
+    %         % % \addlegendentry{\pglnoavlstatic}
+    %         % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpgnoavlstatic};
+    %         % % \addlegendentry{\pgnoavlstatic}
+    %         % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpgnostatic};
+    %         % % \addlegendentry{\pgnostatic}
+    %         % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpgnoavl};
+    %         % % \addlegendentry{\pgnoavl}
+    %         \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfbetterxbpga};
+    %         % \addlegendentry{\pga}
+    %     \end{axis}
+    %     \end{tikzpicture}
+    %     \vspace{-2mm}
+    %     \caption{\betterxb}
+    %     \label{fig:exp_iv_ecdf_betterxb}
+    % \end{subfigure}
     \begin{subfigure}[b]{\subfigwidth}
         \begin{tikzpicture}
         \begin{axis}[
             ecdfplot,
             % xmode=log,
             % xmax=16,
-            xmax=21,
+            xmax=16,
         ]
             \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetdill};
             \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetshev};
             \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetzosp};
             \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetzodb};
+            \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetcriu};
             % \addlegendentry{\dill}
             % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetpglnoavlstatic};
             % % \addlegendentry{\pglnoavlstatic}
@@ -266,65 +288,67 @@
         \end{axis}
         \end{tikzpicture}
         \vspace{-2mm}
-        \caption{\skltweet}
+        \caption{\skltweet (5.7$\times$)}
         \label{fig:exp_iv_save_skltweet}
     \end{subfigure}
-    \begin{subfigure}[b]{\subfigwidth}
-        \begin{tikzpicture}
-        \begin{axis}[
-            ecdfplot,
-            % xmode=log,
-            xmax=21,
-        ]
-            \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaydill};
-            \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdftpsmayshev};
-            \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdftpsmayzosp};
-            \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdftpsmayzodb};
-            % \addlegendentry{\dill}
-            % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypglnoavlstatic};
-            % % \addlegendentry{\pglnoavlstatic}
-            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypgnoavlstatic};
-            % % \addlegendentry{\pgnoavlstatic}
-            % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypgnostatic};
-            % % \addlegendentry{\pgnostatic}
-            % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypgnoavl};
-            % % \addlegendentry{\pgnoavl}
-            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypga};
-            % \addlegendentry{\pga}
-        \end{axis}
-        \end{tikzpicture}
-        \vspace{-2mm}
-        \caption{\tpsmay}
-        \label{fig:exp_iv_ecdf_tpsmay}
-    \end{subfigure}
-    \begin{subfigure}[b]{\subfigwidth}
-        \begin{tikzpicture}
-        \begin{axis}[
-            ecdfplot,
-            % xmode=log,
-            xmax=41,
-        ]
-            \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetdill};
-            \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetshev};
-            \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetzosp};
-            \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetzodb};
-            % \addlegendentry{\dill}
-            % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpglnoavlstatic};
-            % % \addlegendentry{\pglnoavlstatic}
-            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpgnoavlstatic};
-            % % \addlegendentry{\pgnoavlstatic}
-            % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpgnostatic};
-            % % \addlegendentry{\pgnostatic}
-            % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpgnoavl};
-            % % \addlegendentry{\pgnoavl}
-            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpga};
-            % \addlegendentry{\pga}
-        \end{axis}
-        \end{tikzpicture}
-        \vspace{-2mm}
-        \caption{\twittnet}
-        \label{fig:exp_iv_ecdf_twittnet}
-    \end{subfigure}
+    % \begin{subfigure}[b]{\subfigwidth}
+    %     \begin{tikzpicture}
+    %     \begin{axis}[
+    %         ecdfplot,
+    %         % xmode=log,
+    %         xmax=21,
+    %     ]
+    %         \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaydill};
+    %         \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdftpsmayshev};
+    %         \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdftpsmayzosp};
+    %         \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdftpsmayzodb};
+    %         \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaycriu};
+    %         % \addlegendentry{\dill}
+    %         % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypglnoavlstatic};
+    %         % % \addlegendentry{\pglnoavlstatic}
+    %         % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypgnoavlstatic};
+    %         % % \addlegendentry{\pgnoavlstatic}
+    %         % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypgnostatic};
+    %         % % \addlegendentry{\pgnostatic}
+    %         % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypgnoavl};
+    %         % % \addlegendentry{\pgnoavl}
+    %         \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdftpsmaypga};
+    %         % \addlegendentry{\pga}
+    %     \end{axis}
+    %     \end{tikzpicture}
+    %     \vspace{-2mm}
+    %     \caption{\tpsmay}
+    %     \label{fig:exp_iv_ecdf_tpsmay}
+    % \end{subfigure}
+    % \begin{subfigure}[b]{\subfigwidth}
+    %     \begin{tikzpicture}
+    %     \begin{axis}[
+    %         ecdfplot,
+    %         % xmode=log,
+    %         xmax=41,
+    %     ]
+    %         \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetdill};
+    %         \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetshev};
+    %         \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetzosp};
+    %         \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetzodb};
+    %         \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetcriu};
+    %         % \addlegendentry{\dill}
+    %         % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpglnoavlstatic};
+    %         % % \addlegendentry{\pglnoavlstatic}
+    %         % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpgnoavlstatic};
+    %         % % \addlegendentry{\pgnoavlstatic}
+    %         % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpgnostatic};
+    %         % % \addlegendentry{\pgnostatic}
+    %         % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpgnoavl};
+    %         % % \addlegendentry{\pgnoavl}
+    %         \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdftwittnetpga};
+    %         % \addlegendentry{\pga}
+    %     \end{axis}
+    %     \end{tikzpicture}
+    %     \vspace{-2mm}
+    %     \caption{\twittnet}
+    %     \label{fig:exp_iv_ecdf_twittnet}
+    % \end{subfigure}
     \begin{subfigure}[b]{\subfigwidth}
         \begin{tikzpicture}
         \begin{axis}[
@@ -336,6 +360,7 @@
             \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfaicodeshev};
             \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfaicodezosp};
             \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfaicodezodb};
+            \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdfaicodecriu};
             % \addlegendentry{\dill}
             % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfaicodepglnoavlstatic};
             % % \addlegendentry{\pglnoavlstatic}
@@ -350,12 +375,259 @@
         \end{axis}
         \end{tikzpicture}
         \vspace{-2mm}
-        \caption{\aicode}
+        \caption{\aicode (3.2$\times$)}
         \label{fig:exp_iv_ecdf_aicode}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidthwide}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ecdfplot,
+            % xmode=log,
+            % ylabel=Delay Time (s),
+            % xmax=4.5,
+            xmax=11,
+        ]
+            \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfagripreddill};
+            \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfagripredshev};
+            \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfagripredzosp};
+            \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfagripredzodb};
+            \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdfagripredcriu};
+            % \addlegendentry{\dill}
+            % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfagripredpglnoavlstatic};
+            % % \addlegendentry{\pglnoavlstatic}
+            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfagripredpgnoavlstatic};
+            % % \addlegendentry{\pgnoavlstatic}
+            % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfagripredpgnostatic};
+            % % \addlegendentry{\pgnostatic}
+            % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfagripredpgnoavl};
+            % % \addlegendentry{\pgnoavl}
+            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfagripredpga};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\agripred (4.9$\times$)}
+        \label{fig:exp_iv_ecdf_agripred}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidthwide}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ecdfplot,
+            % xmode=log,
+            % ylabel=Delay Time (s),
+            % xmax=4.5,
+            xmax=21,
+        ]
+            \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawdill};
+            \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawshev};
+            \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawzosp};
+            \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawzodb};
+            \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawcriu};
+            % \addlegendentry{\dill}
+            % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawpglnoavlstatic};
+            % % \addlegendentry{\pglnoavlstatic}
+            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawpgnoavlstatic};
+            % % \addlegendentry{\pgnoavlstatic}
+            % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawpgnostatic};
+            % % \addlegendentry{\pgnostatic}
+            % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawpgnoavl};
+            % % \addlegendentry{\pgnoavl}
+            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawpga};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\msciedaw (2.7$\times$)}
+        \label{fig:exp_iv_ecdf_msciedaw}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidthwide}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ecdfplot,
+            % xmode=log,
+            % ylabel=Delay Time (s),
+            % xmax=4.5,
+            xmax=2400,
+        ]
+            \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphdill};
+            \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphshev};
+            \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphzosp};
+            \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphzodb};
+            \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphcriu};
+            % \addlegendentry{\dill}
+            % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphpglnoavlstatic};
+            % % \addlegendentry{\pglnoavlstatic}
+            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphpgnoavlstatic};
+            % % \addlegendentry{\pgnoavlstatic}
+            % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphpgnostatic};
+            % % \addlegendentry{\pgnostatic}
+            % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphpgnoavl};
+            % % \addlegendentry{\pgnoavl}
+            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphpga};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\ecomsmph (12.4$\times$)}
+        \label{fig:exp_iv_ecdf_ecomsmph}
+    \end{subfigure}
+    %
+    % Excluded dataset
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ecdfplot,
+            % xmode=log,
+            % xmax=16,
+            xmax=16,
+        ]
+            \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetexcdill};
+            \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetexcshev};
+            \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetexczosp};
+            \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetexczodb};
+            \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetexccriu};
+            % \addlegendentry{\dill}
+            % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetexcpglnoavlstatic};
+            % % \addlegendentry{\pglnoavlstatic}
+            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetexcpgnoavlstatic};
+            % % \addlegendentry{\pgnoavlstatic}
+            % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetexcpgnostatic};
+            % % \addlegendentry{\pgnostatic}
+            % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetexcpgnoavl};
+            % % \addlegendentry{\pgnoavl}
+            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfskltweetexcpga};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\texttt{\skltweet-exc} (4.0$\times$)}
+        \label{fig:exp_iv_ecdf_skltweetexc}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ecdfplot, 
+            % xmode=log,
+            xmax=160,
+        ]
+            \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfaicodeexcdill};
+            \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfaicodeexcshev};
+            \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfaicodeexczosp};
+            \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfaicodeexczodb};
+            \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdfaicodeexccriu};
+            % \addlegendentry{\dill}
+            % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfaicodeexcpglnoavlstatic};
+            % % \addlegendentry{\pglnoavlstatic}
+            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfaicodeexcpgnoavlstatic};
+            % % \addlegendentry{\pgnoavlstatic}
+            % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfaicodeexcpgnostatic};
+            % % \addlegendentry{\pgnostatic}
+            % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfaicodeexcpgnoavl};
+            % % \addlegendentry{\pgnoavl}
+            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfaicodeexcpga};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\texttt{\aicode-exc} (3.6$\times$)}
+        \label{fig:exp_iv_ecdf_aicodeexc}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidthwide}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ecdfplot,
+            % xmode=log,
+            % ylabel=Delay Time (s),
+            % xmax=4.5,
+            xmax=11,
+        ]
+            \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfagripredexcdill};
+            \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfagripredexcshev};
+            \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfagripredexczosp};
+            \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfagripredexczodb};
+            \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdfagripredexccriu};
+            % \addlegendentry{\dill}
+            % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfagripredexcpglnoavlstatic};
+            % % \addlegendentry{\pglnoavlstatic}
+            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfagripredexcpgnoavlstatic};
+            % % \addlegendentry{\pgnoavlstatic}
+            % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfagripredexcpgnostatic};
+            % % \addlegendentry{\pgnostatic}
+            % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfagripredexcpgnoavl};
+            % % \addlegendentry{\pgnoavl}
+            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfagripredexcpga};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\texttt{\agripred-exc} (5.2$\times$)}
+        \label{fig:exp_iv_ecdf_agripredexc}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidthwide}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ecdfplot,
+            % xmode=log,
+            % ylabel=Delay Time (s),
+            % xmax=4.5,
+            xmax=21,
+        ]
+            \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawexcdill};
+            \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawexcshev};
+            \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawexczosp};
+            \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawexczodb};
+            \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawexccriu};
+            % \addlegendentry{\dill}
+            % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawexcpglnoavlstatic};
+            % % \addlegendentry{\pglnoavlstatic}
+            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawexcpgnoavlstatic};
+            % % \addlegendentry{\pgnoavlstatic}
+            % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawexcpgnostatic};
+            % % \addlegendentry{\pgnostatic}
+            % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawexcpgnoavl};
+            % % \addlegendentry{\pgnoavl}
+            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfmsciedawexcpga};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\texttt{\msciedaw-exc} (4.6$\times$)}
+        \label{fig:exp_iv_ecdf_msciedawexc}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidthwide}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ecdfplot,
+            % xmode=log,
+            % ylabel=Delay Time (s),
+            % xmax=4.5,
+            xmax=2400,
+        ]
+            \addplot[ecdfdill] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphexcdill};
+            \addplot[ecdfshev] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphexcshev};
+            \addplot[ecdfzosp] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphexczosp};
+            \addplot[ecdfzodb] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphexczodb};
+            \addplot[ecdfcriu] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphexccriu};
+            % \addlegendentry{\dill}
+            % \addplot[ecdfpglnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphexcpglnoavlstatic};
+            % % \addlegendentry{\pglnoavlstatic}
+            % \addplot[ecdfpgnoavlstatic] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphexcpgnoavlstatic};
+            % % \addlegendentry{\pgnoavlstatic}
+            % \addplot[ecdfpgnostatic] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphexcpgnostatic};
+            % % \addlegendentry{\pgnostatic}
+            % \addplot[ecdfpgnoavl] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphexcpgnoavl};
+            % % \addlegendentry{\pgnoavl}
+            \addplot[ecdfpga] table [x=save_s,y=ecdf] {\tableexpivecdfecomsmphexcpga};
+            % \addlegendentry{\pga}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{\texttt{\ecomsmph-exc} (14.4$\times$)}
+        \label{fig:exp_iv_ecdf_ecomsmphexc}
     \end{subfigure}
     \vspace{-3mm}
     % \caption{Empirical cumulative distributions (eCDFs) of the durations blocked by \dill vs. \pga across notebooks.}
-    \caption{Empirical cumulative distributions (eCDFs) of the saving times (closer to the top-left corner are better).}
+    \caption{\fix{Empirical cumulative distributions (eCDFs) of the perceived saving latency (closer to the top-left corner are better). \texttt{\skltweet-exc} refers to \skltweet excluding dataset variables and so on. Numbers in parentheses are \system's speedup over the best baseline; Chipmink stores all variables 2.7--12.4$\times$ faster and selected variables 3.6--14.4$\times$ faster than the best baselines.}}
     \label{fig:exp_iv_ecdf}
     \vspace{\undercaptionspace}
 \end{figure*}

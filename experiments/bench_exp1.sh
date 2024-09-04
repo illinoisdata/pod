@@ -27,7 +27,7 @@ else
     echo 'Example: bash scripts/bench_exp1.sh snp,pfl rmlist,storesfg'
     exit 1
 fi
-echo "Running experiments/bench_exp1_nb,sh on [ ${suts[*]} ] x [ ${nb_keys[*]} ]"
+echo "Running experiments/bench_exp1_nb.sh on [ ${suts[*]} ] x [ ${nb_keys[*]} ]"
 
 for ((i = 0; i < ${#suts[@]}; i++)) do
     for ((j = 0; j < ${#nb_keys[@]}; j++)) do
