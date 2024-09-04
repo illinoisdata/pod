@@ -1,0 +1,268 @@
+\def\subfigwidth{0.49\linewidth}
+\def\subfigheight{30mm}
+
+\pgfplotsset{
+    ploadplot/.style={
+        height=\subfigheight,
+        width=\linewidth,
+        axis lines=left,
+        ymajorgrids,
+        % yminorgrids,
+        minor y tick num=1,
+        % ymode=log,
+        % ymax=300,
+        % log origin=infty,
+        % ytick={0.01, 0.1, 1, 10, 100, 1000},
+        % xmode=log,
+        % xmin=0.00009,
+        % xmax=200,
+        % enlarge x limits=0.1,
+        % xmajorgrids,
+        minor x tick num=1,
+        % xtick={0.001, 0.01, 0.1, 1, 10, 100, 1000},
+        % nodes near coords,
+        % point meta=explicit symbolic,
+        % nodes near coords style={align=left, rotate=90, anchor=west},
+        % legend columns=1,
+        % legend style={at={(1.05,0.0)},anchor=south west,align=left},
+        % reverse legend,
+        label style={font=\smalllabelsize},
+        every tick label/.append style={font=\smalllabelsize},
+    },
+}
+\tikzset{
+    ploaddill/.style={%
+        draw=dillcolor,
+        mark=x,
+        % mark repeat={4},
+        mark options={
+            draw=dillcolor,
+            fill=dillcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadshev/.style={%
+        draw=shevcolor,
+        mark=triangle*,
+        % mark repeat={4},
+        mark options={
+            draw=shevcolor,
+            fill=shevcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadzosp/.style={%
+        draw=zospcolor,
+        mark=diamond*,
+        % mark repeat={4},
+        mark options={
+            draw=zospcolor,
+            fill=zospcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadzodb/.style={%
+        draw=zodbcolor,
+        mark=square*,
+        % mark repeat={4},
+        mark options={
+            draw=zodbcolor,
+            fill=zodbcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadcriu/.style={%
+        draw=criucolor,
+        mark=pentagon*,
+        % mark repeat={4},
+        mark options={
+            draw=criucolor,
+            fill=criucolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadexhaust/.style={%
+        % thick,
+        draw=exhaustcolor,
+        mark=+,
+        % mark repeat={4},
+        mark options={
+            draw=exhaustcolor,
+            fill=exhaustcolorlight,
+            fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+\tikzset{
+    ploadpga/.style={%
+        thick,
+        draw=pgacolor,
+        mark=*,
+        % mark repeat={4},
+        mark options={
+            draw=pgacolor,
+            fill=pgacolor,
+            % fill opacity=0.0,
+            scale=0.75
+        }
+    },
+    >=LaTeX
+}
+
+\begin{figure}[t]
+    \centering
+    \begin{subfigure}[b]{\linewidth} \centering
+    %% DUMMY PICTURE TO ADD LEGEND.
+        \begin{tikzpicture}
+        \begin{axis}[
+            ticks=none,
+            height=20mm,
+            width=\linewidth,
+            hide axis,
+            xmin=10,  % Need these limits for some reason...
+            xmax=50,
+            ymin=0,
+            ymax=0.4,
+            legend columns=4,
+            legend style={at={(0.0,0.0)},anchor=south,align=center,/tikz/every even column/.append style={column sep=3mm},nodes={scale=0.75, transform shape}},
+        ]
+            \node[align=center, opacity=1] {
+                \addlegendimage{ploaddill}
+                \addlegendentry{\dill}
+                \addlegendimage{ploadshev}
+                \addlegendentry{\shev}
+                \addlegendimage{ploadzosp}
+                \addlegendentry{\zosp}
+                \addlegendimage{ploadzodb}
+                \addlegendentry{\zodb}
+                \addlegendimage{ploadcriu}
+                \addlegendentry{\criu}
+                \addlegendimage{ploadexhaust}
+                \addlegendentry{\exhaust}
+                \addlegendimage{ploadpga}
+                \addlegendentry{\pga (Ours)}
+            };
+        \end{axis}
+        \end{tikzpicture}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ploadplot,
+            % xlabel=Namespace (GB),
+            xlabel=Number of objects,
+            ylabel=Storage (GB),
+            xmode=log,
+            ymode=log,
+            % xmax=10,
+            % xmin=0.0000001,
+            xmax=100000000,
+            xmin=1,
+            ymax=1000,
+            ymin=0.000000001,
+            % xtick={0.0000001, 0.00001, 0.001, 0.1, 10.0},
+            xtick={1, 100, 10000, 1000000, 100000000},
+            ytick={0.000000001, 0.000001, 0.001, 1.0, 1000.0},
+        ]
+            % \addplot[ploaddill] table [x=nssize,y=dill_storage_gb] {\tableexpvi};
+            % % \addlegendentry{\dill}
+            % \addplot[ploadshev] table [x=nssize,y=shev_storage_gb] {\tableexpvi};
+            % % \addlegendentry{\shev}
+            % \addplot[ploadzosp] table [x=nssize,y=zosp_storage_gb] {\tableexpvi};
+            % % \addlegendentry{\zosp}
+            % \addplot[ploadzodb] table [x=nssize,y=zodb_storage_gb] {\tableexpvi};
+            % % \addlegendentry{\zodb}
+            % \addplot[ploadcriu] table [x=nssize,y=criu_storage_gb] {\tableexpvi};
+            % % \addlegendentry{\criu}
+            % \addplot[ploadpga] table [x=nssize,y=pga_storage_gb] {\tableexpvi};
+            % % \addlegendentry{\pga}
+            % \addplot[ploadexhaust] table [x=nssize,y=exhaust_storage_gb] {\tableexpvi};
+            % % \addlegendentry{\exhaust}
+
+            % \draw[thick, dashed, color=cZmain] 
+            % (axis cs:0.000000001, 0.000000001) -- node[below, sloped, text=cZmain, font=\scriptsize] {Ideal storage} (axis cs:1000, 1000);
+            
+            \addplot[ploaddill] table [x=nsobj,y=dill_storage_gb] {\tableexpvi};
+            % \addlegendentry{\dill}
+            \addplot[ploadshev] table [x=nsobj,y=shev_storage_gb] {\tableexpvi};
+            % \addlegendentry{\shev}
+            \addplot[ploadzosp] table [x=nsobj,y=zosp_storage_gb] {\tableexpvi};
+            % \addlegendentry{\zosp}
+            \addplot[ploadzodb] table [x=nsobj,y=zodb_storage_gb] {\tableexpvi};
+            % \addlegendentry{\zodb}
+            \addplot[ploadcriu] table [x=nsobj,y=criu_storage_gb] {\tableexpvi};
+            % \addlegendentry{\criu}
+            \addplot[ploadpga] table [x=nsobj,y=pga_storage_gb] {\tableexpvi};
+            % \addlegendentry{\pga}
+            \addplot[ploadexhaust] table [x=nsobj,y=exhaust_storage_gb] {\tableexpvi};
+            % \addlegendentry{\exhaust}
+            \draw[thick, dashed, color=cZmain] 
+            (axis cs:2, 0.0000001) -- node[below, sloped, text=cZmain, font=\scriptsize] {Ideal storage} (axis cs:100000100, 10);
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{Total storage size}
+        \label{fig:exp_vi_storage}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            ploadplot,
+            xlabel=Number of objects,
+            ylabel=Saving Time (s),
+            xmode=log,
+            ymode=log,
+            xmax=100000000,
+            xmin=1,
+            ymax=10000,
+            ymin=0.0001,
+            xtick={1, 100, 10000, 1000000, 100000000},
+            ytick={0.0001, 0.01, 1.0, 100.0, 10000.0},
+        ]
+            \addplot[ploaddill] table [x=nsobj,y=dill_avg_save_s] {\tableexpvi};
+            % \addlegendentry{\dill}
+            \addplot[ploadshev] table [x=nsobj,y=shev_avg_save_s] {\tableexpvi};
+            % \addlegendentry{\shev}
+            \addplot[ploadzosp] table [x=nsobj,y=zosp_avg_save_s] {\tableexpvi};
+            % \addlegendentry{\zosp}
+            \addplot[ploadzodb] table [x=nsobj,y=zodb_avg_save_s] {\tableexpvi};
+            % \addlegendentry{\zodb}
+            \addplot[ploadcriu] table [x=nsobj,y=criu_avg_save_s] {\tableexpvi};
+            % \addlegendentry{\criu
+            \addplot[ploadpga] table [x=nsobj,y=pga_avg_save_s] {\tableexpvi};
+            % \addlegendentry{\pga}
+            \addplot[ploadexhaust] table [x=nsobj,y=exhaust_avg_save_s] {\tableexpvi};
+            % \addlegendentry{\exhaust}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-2mm}
+        \caption{Average saving time}
+        \label{fig:exp_vi_save}
+    \end{subfigure}
+    \vspace{-3mm}
+    \caption{\fix{Storage and save time as namespace size scales.}}
+    \label{fig:exp_vi}
+    \vspace{\undercaptionspace}
+\end{figure}

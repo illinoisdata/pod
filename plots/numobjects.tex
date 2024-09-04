@@ -1,0 +1,43 @@
+\pgfplotsset{
+    compat=1.15,
+    objcount/.style={
+        solid,
+        thick,
+        draw=cAmain,
+        fill=cAlight,
+    },
+}
+
+\begin{figure}[t]
+    \centering
+    \hspace{-3mm}
+    \begin{tikzpicture}
+    \begin{axis}[
+        height=30mm,
+        width=1.0\linewidth,
+        xbar,
+        bar width=1.0,
+        axis y line=left,
+        axis x line=bottom,
+        xlabel=Number of Objects,
+        % ylabel=Notebooks,
+        xmode=log,
+        xmajorgrids,
+        xminorgrids,
+        % xmin=1,
+        xmin=100,
+        xmax=40000000,
+        ymin=-1,
+        ymax=9,
+        ytick=data,
+        yticklabels from table={\tablenumobjects}{label},
+        every y tick label/.append style={font=\tiny},
+    ]
+        \addplot[objcount] table [x=max,y=index] {\tablenumobjects};
+    \end{axis}
+    \end{tikzpicture}
+    \vspace{-4mm}
+    \caption{\fix{Numbers of objects from real notebooks.}}
+    \label{fig:numobjects}
+    \vspace{\undercaptionspace}
+\end{figure}

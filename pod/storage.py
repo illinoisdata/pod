@@ -14,6 +14,7 @@ from pathlib import Path
 from queue import Queue
 from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
+import lz4.frame as zlib
 import neo4j
 import psycopg2
 import pymongo
@@ -524,6 +525,101 @@ class FilePodStorage(PodStorage):
 
     def is_init(self) -> bool:
         return self.stats_path().exists() and self.index_path(0).exists()
+
+
+""" File-based storage with compression: each pod in one file """
+
+# TODO: This is a quick hack for experiment; should be cleaned later.
+
+
+class CompressedFilePodStorageWriter(FilePodStorageWriter):
+    def __init__(self, storage: CompressedFilePodStorage, *args, **kwargs):
+        FilePodStorageWriter.__init__(self, storage, *args, **kwargs)
+        self.compress_storage = storage
+
+    def flush_pod_impl(self, pod_page_buffer: FilePodStoragePodPage):
+        # Write buffer.
+        page_idx = self.storage.next_pod_page_idx()
+        with open(self.storage.pod_page_path(page_idx), "wb") as f:
+            f.write(self.compress_storage.compress(pickle.dumps(pod_page_buffer)))
+
+        # Update index.
+        self.new_pid_index.update({pid: page_idx for pid in pod_page_buffer})
+
+
+class CompressedFilePodStorageReader(PodReader):
+    def __init__(self, storage: CompressedFilePodStorage, expected_pids: Set[PodId], page_idxs: Set[int]) -> None:
+        # from pod.stats import PodCacheStat  # stat_cache_pfl
+        # self.cache_stat = PodCacheStat()  # stat_cache_pfl
+
+        self.storage = storage
+        self.expected_pids = expected_pids
+        self.page_cache: Dict[int, FilePodStoragePodPage] = {}
+        for page_idx in page_idxs:
+            with open(self.storage.pod_page_path(page_idx), "rb") as f:
+                self.page_cache[page_idx] = pickle.loads(self.storage.decompress(f.read()))
+                # self.cache_stat.add_io(  # stat_cache_pfl
+                # sum(len(pod_bytes)  # stat_cache_pfl
+                # for _, pod_bytes in self.page_cache[page_idx].items()))  # stat_cache_pfl
+
+    def read(self, pod_id: PodId) -> io.IOBase:
+        resolved_pid = self.storage.resolve_pid_synonym(pod_id)
+        page_idx = self.storage.search_index(resolved_pid)
+        page_path = self.storage.pod_page_path(page_idx)
+        if page_idx not in self.page_cache:
+            logger.warning(f"Unexpected cache miss on {pod_id} (={resolved_pid}), page_idx= {page_path}")
+            with open(page_path, "rb") as f:
+                self.page_cache[page_idx] = pickle.loads(self.storage.decompress(f.read()))
+                # self.cache_stat.add_io(  # stat_cache_pfl
+                # sum(len(pod_bytes)  # stat_cache_pfl
+                # for _, pod_bytes in self.page_cache[page_idx].items()))  # stat_cache_pfl
+        page = self.page_cache[page_idx]
+        if resolved_pid not in page:
+            raise ValueError(f"False index pointing {pod_id} ({resolved_pid}) to {page_path}: {page.keys()}")
+        # self.cache_stat.add_read(str(resolved_pid), len(page[resolved_pid]))  # stat_cache_pfl
+        return io.BytesIO(page[resolved_pid])
+
+    def read_meta(self, pod_id: PodId) -> bytes:
+        return self.storage.deps[pod_id].meta
+
+    def dep_pids_by_rank(self) -> List[PodId]:
+        return sorted(self.expected_pids, key=self.storage.pid_rank)
+
+    # def __del__(self) -> None:  # stat_cache_pfl
+    #     self.cache_stat.summary()  # stat_cache_pfl
+
+
+class CompressedFilePodStorage(FilePodStorage):
+    def __init__(self, *args, **kwargs):
+        FilePodStorage.__init__(self, *args, **kwargs)
+
+    def writer(self) -> PodWriter:
+        return CompressedFilePodStorageWriter(self)
+
+    def reader(self, hint_pod_ids: List[PodId] = []) -> PodReader:
+        seen_pid: Set[PodId] = set()
+        pid_queue: Queue[PodId] = Queue()
+        for pid in hint_pod_ids:
+            seen_pid.add(pid)
+            pid_queue.put(pid)
+        page_idxs: Set[int] = set()
+        while not pid_queue.empty():
+            pid = pid_queue.get()
+            resolved_pid = self.resolve_pid_synonym(pid)
+            page_idx = self.search_index(resolved_pid)
+            page_idxs.add(page_idx)
+            for dep_pid in self.deps[pid].dep_pids:
+                if dep_pid not in seen_pid:
+                    seen_pid.add(dep_pid)
+                    pid_queue.put(dep_pid)
+        return CompressedFilePodStorageReader(self, seen_pid, page_idxs)
+
+    def compress(self, obj_bytes: bytes) -> bytes:
+        compressed_obj_bytes = zlib.compress(obj_bytes)
+        return compressed_obj_bytes
+
+    def decompress(self, compressed_obj_bytes: bytes) -> bytes:
+        return zlib.decompress(compressed_obj_bytes)
 
 
 """ PostgreSQL storage: each pod as an entry in a database """

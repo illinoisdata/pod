@@ -12,14 +12,16 @@ from dataclasses import dataclass
 from types import CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set
 
+import lz4.frame as zlib
 import matplotlib.figure
 import numpy as np
 import pandas as pd
+import xdelta3
 from loguru import logger
 
 from pod.common import Object, ObjectId, PodDependency, PodId, TimeId, next_rank, step_time_id
 from pod.feature import __FEATURE__
-from pod.memo import MemoId, StaticPodPicklerMemo, StaticPodUnpicklerMemo
+from pod.memo import MemoId, MemoPageAllocator, StaticPodPicklerMemo, StaticPodUnpicklerMemo
 from pod.storage import PodReader, PodStorage, PodWriter
 
 if pod.__pickle__.BASE_PICKLE == "dill":
@@ -115,6 +117,79 @@ class SnapshotPodPickling(PodPickling):
         return self.root_dir / f"{pid.tid}_{pid.oid}.pkl"
 
 
+""" CompressedSnapshot: pickling object as a whole """
+
+
+class CompressedSnapshotPodPicklingDumpSession(PodPicklingDumpSession):
+    def __init__(self, pickling: CompressedSnapshotPodPickling) -> None:
+        self.pickling = pickling
+
+    def dump(self, pid: PodId, obj: Object) -> None:
+        with open(self.pickling.pickle_path(pid), "wb") as f:
+            f.write(self.pickling.compress(pickle.dumps(obj)))
+
+
+class CompressedSnapshotPodPickling(PodPickling):
+    def __init__(self, root_dir: Path, delta: bool = False) -> None:
+        self.root_dir = root_dir
+        self.root_dir.mkdir(parents=True, exist_ok=True)
+        self.delta = delta
+        self.ref_bytes: Optional[bytes] = None
+
+    def dump(self, obj: Object) -> PodId:
+        tid = step_time_id()
+        pid = PodId(tid, id(obj))
+        with open(self.pickle_path(pid), "wb") as f:
+            f.write(self.compress(pickle.dumps(obj)))
+        return pid
+
+    def dump_batch(self, pods: Dict[PodId, Object]) -> PodPicklingDumpSession:
+        return CompressedSnapshotPodPicklingDumpSession(self)
+
+    def load(self, pid: PodId) -> Object:
+        with open(self.pickle_path(pid), "rb") as f:
+            return pickle.loads(self.decompress(f.read()))
+
+    def load_batch(self, pids: Set[PodId]) -> Dict[PodId, Object]:
+        return {pid: self.load(pid) for pid in pids}
+
+    def write_ref(self, ref_bytes: bytes):
+        with open(self.ref_path(), "wb") as f:
+            f.write(ref_bytes)
+
+    def read_ref(self):
+        with open(self.ref_path(), "rb") as f:
+            return f.read()
+
+    def compress(self, obj_bytes: bytes) -> bytes:
+        if self.delta:
+            if self.ref_bytes is None:
+                self.ref_bytes = obj_bytes
+                self.write_ref(self.ref_bytes)
+            compressed_obj_bytes = xdelta3.encode(self.ref_bytes, obj_bytes)
+            logger.debug(f"Delta-compressed {len(obj_bytes)} to {len(compressed_obj_bytes)}")
+            return compressed_obj_bytes
+        else:
+            compressed_obj_bytes = zlib.compress(obj_bytes)
+            logger.debug(f"Zlib-compressed {len(obj_bytes)} to {len(compressed_obj_bytes)}")
+            return compressed_obj_bytes
+
+    def decompress(self, compressed_obj_bytes: bytes) -> bytes:
+        if self.delta:
+            return xdelta3.decode(self.read_ref(), compressed_obj_bytes)
+        else:
+            return zlib.decompress(compressed_obj_bytes)
+
+    def estimate_size(self) -> int:
+        return sum(f.stat().st_size for f in self.root_dir.glob("**/*") if f.is_file())
+
+    def pickle_path(self, pid: PodId) -> Path:
+        return self.root_dir / f"{pid.tid}_{pid.oid}.zpkl"
+
+    def ref_path(self) -> Path:
+        return self.root_dir / "ref.bin"
+
+
 """ Many: pickling object using many picklings (e.g., exhaustive search) """
 
 
@@ -123,19 +198,24 @@ class ManyPodPicklingDumpSession(PodPicklingDumpSession):
         self.many_pickling = many_pickling
         self.pods = pods
 
-        self.pickling_batches = [pickling.dump_batch(pods) for pickling in self.many_pickling.picklings]
+        self.pickling_batches = [(pickling.dump_batch(pods), MemoPageAllocator()) for pickling in self.many_pickling.picklings]
+        self.original_allocator: Optional[MemoPageAllocator] = None
 
     def __enter__(self) -> ManyPodPicklingDumpSession:
-        for pickling_batch in self.pickling_batches:
+        self.original_allocator = StaticPodPicklerMemo.PAGE_ALLOCATOR
+        for pickling_batch, _ in self.pickling_batches:
             pickling_batch.__enter__()
         return self
 
     def dump(self, pid: PodId, obj: Object) -> None:
-        for pickling_batch in self.pickling_batches:
+        for pickling_batch, allocator in self.pickling_batches:
+            StaticPodPicklerMemo.PAGE_ALLOCATOR = allocator
             pickling_batch.dump(pid, obj)
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        for pickling_batch in self.pickling_batches:
+        assert self.original_allocator is not None
+        StaticPodPicklerMemo.PAGE_ALLOCATOR = self.original_allocator
+        for pickling_batch, _ in self.pickling_batches:
             pickling_batch.__exit__(exc_type, exc_val, exc_tb)
 
 

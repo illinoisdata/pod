@@ -124,7 +124,7 @@ class AllowlistVisitor(ast.NodeVisitor):
         ast.Return,
         ast.While,
         ast.If,
-        ast.Match,
+        # ast.Match,  # Not exist in Python 3.9
         ast.Index,
         ast.Raise,
         ast.Try,
@@ -191,15 +191,15 @@ class AllowlistVisitor(ast.NodeVisitor):
         ast.keyword,  # Keyword in function calls
         ast.alias,  # Import alias
         ast.withitem,  # With statement item
-        ast.match_case,
-        ast.MatchValue,
-        ast.MatchSingleton,
-        ast.MatchSequence,
-        ast.MatchMapping,
-        ast.MatchClass,
-        ast.MatchStar,
-        ast.MatchAs,
-        ast.MatchOr,
+        # ast.match_case,  # Not exist in Python 3.9
+        # ast.MatchValue,  # Not exist in Python 3.9
+        # ast.MatchSingleton,  # Not exist in Python 3.9
+        # ast.MatchSequence,  # Not exist in Python 3.9
+        # ast.MatchMapping,  # Not exist in Python 3.9
+        # ast.MatchClass,  # Not exist in Python 3.9
+        # ast.MatchStar,  # Not exist in Python 3.9
+        # ast.MatchAs,  # Not exist in Python 3.9
+        # ast.MatchOr,  # Not exist in Python 3.9
         # ast.ParamSpec,
         # ast.TypeVarTuple,
         ast.TypeIgnore,

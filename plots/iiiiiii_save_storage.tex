@@ -1,0 +1,114 @@
+\def\subfigwidth{0.49\linewidth}
+\def\subfigheight{35mm}
+
+\begin{figure}[t]
+    \centering
+    \begin{subfigure}[b]{\linewidth} \centering
+    %% DUMMY PICTURE TO ADD LEGEND.
+        \begin{tikzpicture}
+        \begin{axis}[
+            ybar,
+            ticks=none,
+            height=20mm,
+            width=\linewidth,
+            hide axis,
+            xmin=10,  % Need these limits for some reason...
+            xmax=50,
+            ymin=0,
+            ymax=0.4,
+            area legend,
+            legend columns=-1,
+            legend style={at={(0.0,0.0)},anchor=south,align=center,/tikz/every even column/.append style={column sep=3mm}},
+        ]
+            \node[align=center, opacity=1] {
+                \addlegendimage{bardill}
+                \addlegendentry{\dill}
+                \addlegendimage{barpga}
+                \addlegendentry{\pga (Ours)}
+            };
+        \end{axis}
+        \end{tikzpicture}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            height=\subfigheight,
+            width=1.0\linewidth,
+            ybar,
+            bar width=0.16,
+            axis lines=left,
+            % xlabel=Number of Objects,
+            ylabel=Rel. Storage,
+            ymajorgrids,
+            % yminorgrids,
+            % xmin=1000,
+            % xmax=40000000,
+            ymode=log,
+            ymin=0.01,
+            ymax=10,
+            log origin=infty,
+            enlarge x limits=0.3,
+            ytick={0.01, 0.1, 1, 10, 100, 1000, 10000},
+            xtick={data},
+            xticklabels from table={\tableexpvii}{nbstr},
+            % x tick label style={rotate=20, anchor=north},
+            nodes near coords,
+            point meta=explicit symbolic,
+            nodes near coords style={font=\scriptsize, align=left, rotate=90, anchor=west},
+            legend columns=2,
+            legend style={at={(0.03,1.0)},anchor=north west}
+        ]
+            \addplot[bardill] table [x=index,y=inv_dill_rel_storage_gb] {\tableexpvii};
+            % \addlegendentry{\dill}
+            \addplot[barpga] table [x=index,y=inv_pga_rel_storage_gb,meta=pga_rel_storage_gb] {\tableexpvii};
+            % \addlegendentry{\pga (Ours)}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-3mm}
+        \caption{Relative storage size}
+        \label{fig:exp_i_storage}
+    \end{subfigure}
+    \begin{subfigure}[b]{\subfigwidth}
+        \begin{tikzpicture}
+        \begin{axis}[
+            height=\subfigheight,
+            width=1.0\linewidth,
+            ybar,
+            bar width=0.16,
+            axis lines=left,
+            % xlabel=Number of Objects,
+            ylabel=Rel. Save Time,
+            ymajorgrids,
+            % yminorgrids,
+            % xmin=1000,
+            % xmax=40000000,
+            ymode=log,
+            ymin=0.01,
+            ymax=10,
+            log origin=infty,
+            enlarge x limits=0.3,
+            ytick={0.01, 0.1, 1.0, 10, 100, 1000, 10000},
+            xtick={data},
+            xticklabels from table={\tableexpvii}{nbstr},
+            % x tick label style={rotate=20, anchor=north},
+            nodes near coords,
+            point meta=explicit symbolic,
+            nodes near coords style={font=\scriptsize, align=left, rotate=90, anchor=west},
+            legend columns=2,
+            legend style={at={(0.03,1.0)},anchor=north west}
+        ]
+            \addplot[bardill] table [x=index,y=inv_dill_rel_avg_save_s] {\tableexpvii};
+            % \addlegendentry{\dill}
+            \addplot[barpga] table [x=index,y=inv_pga_rel_avg_save_s,meta=pga_rel_avg_save_s] {\tableexpvii};
+            % \addlegendentry{\pga (Ours)}
+        \end{axis}
+        \end{tikzpicture}
+        \vspace{-3mm}
+        \caption{Relative overhead saving time}
+        \label{fig:exp_i_save}
+    \end{subfigure}
+    \vspace{-3mm}
+    \caption{\fix{\pga storage size and overhead saving time relative to \dill across different notebook characteristics (RE: read-only cells, AP: cells appending new variables, WR: cells applying write operations on the same variable). \pga saves storage space even when the notebook heavily mutates its namespace; however, \pga can be slower in such cases.}}
+    \label{fig:exp_vii_characteristics}
+    \vspace{\undercaptionspace}
+\end{figure}

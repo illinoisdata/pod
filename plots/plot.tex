@@ -1,24 +1,75 @@
 \documentclass[sigconf,nonacm,screen]{acmart}
 
+\title{Experiment Figures in\\Chipmink: Partial Object Store for Temporal Exploration on Notebooks}
+\author[Supawit Chockchowwat, Sumay Thakurdesai, Zhaoheng Li, Matthew S. Krafczyk, Yongjoo Park]{Supawit Chockchowwat, Sumay Thakurdesai, Zhaoheng Li, Matthew S. Krafczyk, Yongjoo Park}
+\affiliation{%
+  \institution{University of Illinois at Urbana-Champaign}
+  \streetaddress{201 N. Goodwin Ave.}
+  \city{Urbana}
+  \state{Illinois}
+  \country{United States}
+}
+\email{{supawit2,sumayst2,zl20,mkrafcz2,yongjoo}@illinois.edu}
+
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{tikz}
+\usepackage{xspace}
+\usetikzlibrary{calc,positioning,fit}
+\usetikzlibrary{backgrounds}
+\usetikzlibrary{arrows.meta}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.8}
+\usetikzlibrary{patterns}
+\usepgfplotslibrary{statistics}
+\usepgfplotslibrary{colorbrewer}
+\usepgfplotslibrary{fillbetween}
+\usepackage{pgfplotstable}
+\usepackage[capitalise]{cleveref}
+
+\usepackage{xcolor}
+
 \input{macros}
 
 % Read data
 \pgfplotstableread{./exp_i.txt}{\tableexpi}
+\pgfplotstableread{./exp_i_skltweet.txt}{\tableexpiskltweet}
 \pgfplotstableread{./exp_ii.txt}{\tableexpii}
 \pgfplotstableread{./exp_ii_cache.txt}{\tableexpiicache}
 \pgfplotstableread{./exp_iv.txt}{\tableexpiv}
+\pgfplotstableread{./exp_v.txt}{\tableexpv}
+\pgfplotstableread{./exp_vi.txt}{\tableexpvi}
+\pgfplotstableread{./exp_vii.txt}{\tableexpvii}
+\pgfplotstableread{./exp_vii_mr.txt}{\tableexpviimr}
+\pgfplotstableread{./exp_c.txt}{\tableexpc}
+\pgfplotstableread{./numobjects.txt}{\tablenumobjects}
+\input{exp_i_percell}
 \input{exp_i_ploads}
 \input{exp_iv_waits}
 \input{exp_iv_ecdf}
+\input{exp_iv_ecdf_rep}
 
 % Make plots
 \begin{document}
-\input{i_save_storage.tex}
-\input{iiii_ecdf.tex}
-\input{i_partial_load.tex}
-\input{ii_avf_save_storage.tex}
-\input{ii_cache_storage.tex}
-\input{iii_save_storage.tex}
-\input{iiii_ecdf_compare.tex}
+    
+    \maketitle
+    \onecolumn
+
+    \input{numobjects.tex}
+    \input{intro_costpercell.tex}
+    \input{intro_delta.tex}
+    \input{i_save_storage.tex}
+    \input{iiii_ecdf.tex}
+    \input{i_partial_load.tex}
+    \input{ii_avf_save_storage.tex}
+    \input{ii_cache_storage.tex}
+    \input{iii_save_storage.tex}
+    \input{iiii_ecdf_compare.tex}
+    \input{iiiii_save_storage.tex}
+    \input{iiiiii_scale_save_storage.tex}
+    \input{iiiiiii_save_storage.tex}
+    \input{iiiiiii_mut_save_storage.tex}
+    \input{iiiiiiiiii_overhead.tex}
 \end{document}
 \endinput

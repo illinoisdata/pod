@@ -156,8 +156,8 @@ class FixedDecisionPoddingModel(PoddingModel):
         self._decision_count = 0
 
     def podding_fn(self, obj: Object, pickler: BasePickler) -> PodAction:
-        if isinstance(obj, (PodId,)):
-            return PodAction.split_final
+        if isinstance(obj, (PodId,)) or (isinstance(obj, str) and obj in ["pod.common", "PodId"]) or obj == PodId:
+            return PodAction.bundle  # Preset to reduce decision count (always better than split).
         next_decision = self._decision_string % 2
         self._decision_string = self._decision_string // 2
         if self._enable_log:
