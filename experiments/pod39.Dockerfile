@@ -7,7 +7,11 @@ RUN apt-get upgrade --yes
 RUN apt-get install build-essential make vim tmux git htop sysstat ioping nfs-common vmtouch --yes
 
 # Install Python
-RUN DEBIAN_FRONTEND="noninteractive" apt-get install python3.11 python-is-python3 python3-full python3-pip --yes
+RUN apt-get install libffi-dev software-properties-common --yes
+RUN add-apt-repository ppa:deadsnakes/ppa --yes && apt update
+RUN DEBIAN_FRONTEND="noninteractive" apt-get install python3.9 --yes
+RUN ln -sf python3.9 /usr/bin/python
+RUN apt-get install python3.9-distutils python3-full python3-pip --yes
 RUN python -m pip install --upgrade pip
 
 # Install PostgreSQL client
@@ -43,7 +47,7 @@ RUN python -m pip install  ./lib
 # Install requirements first to improve cachings
 WORKDIR /
 COPY ./requirements.txt /pod/requirements.txt
-RUN apt-get install libpq-dev libhdf5-dev pkg-config --yes
+RUN apt-get install libpq-dev libhdf5-dev pkg-config python3.9-dev --yes
 RUN python -m pip install -r /pod/requirements.txt
 
 # Install Pod

@@ -28,6 +28,20 @@ services:
     working_dir: /pod
     command: /bin/bash -c "cd /criu && criu service -vv"
 
+  pod39:
+    image: pod39
+    hostname: pod39
+    tty: true
+    stdin_open: true
+    privileged: true
+    cap_add:
+      - SYS_PTRACE
+    volumes:
+      - ${PWD}:/pod
+      - ${POD_NBDATA:-./nbdata}:/pod/nbdata
+    working_dir: /pod
+    command: ["/bin/bash"]
+
   podpsql:
     image: postgres:16.1-bookworm
     hostname: podpsql
