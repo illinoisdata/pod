@@ -63,6 +63,11 @@
 \newcommand{\agripred}{\texttt{agripred}\xspace}
 \newcommand{\msciedaw}{\texttt{msciedaw}\xspace}
 \newcommand{\ecomsmph}{\texttt{ecomsmph}\xspace}
+\newcommand{\netmnist}{\texttt{netmnist}\xspace}
+\newcommand{\rlactcri}{\texttt{rlactcri}\xspace}
+\newcommand{\vaenet}{\texttt{vaencnet}\xspace}
+\newcommand{\tseqpred}{\texttt{tseqpred}\xspace}
+\newcommand{\wordlang}{\texttt{wordlang}\xspace}
 
 \newcommand{\pending}[1]{{\color{red} #1}}
 \newcommand*\circled[1]{\tikz[baseline=(char.base)]{
@@ -74,12 +79,7 @@
 \settopmatter{printfolios=true}
 \settopmatter{printacmref=true}
 
-\newcounter{fixlabelcounter}
-\DeclareRobustCommand{\labelText}[1]{\refstepcounter{fixlabelcounter}\label{#1}}
-\crefname{fixlabelcounter}{Revise}{Revise}
-\Crefname{fixlabelcounter}{Revise}{Revise}
-\newcommand{\fixed}[2]{\protect\labelText{#2}{\color{purple} #1}}
-\newcommand{\fix}[1]{{\color{purple} #1}}
+% \newcommand{\fix}[1]{{\color{purple} #1}}
 
 % \makeatletter
 % \newcommand{\labelText}[2]{%

@@ -3,10 +3,12 @@ import pod.__pickle__  # noqa, isort:skip
 
 import contextlib
 import gc
+import inspect
 import io
 import random
 import signal
 import sys
+import threading
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -145,10 +147,16 @@ class BenchArgs:
     roc_path: Optional[Path] = None  # Path to rate of change model.
 
 
-""" Notebook handler/executor """
+""" Python handler/executor """
 
 
 NotebookCell = str
+
+
+class ExperimentExecutor:
+    def iter(self) -> Generator[Tuple[NotebookCell, ExperimentNamespace, str, str], None, None]:
+        # Returns last executed code, current namespace, stdout, stderr
+        raise NotImplementedError("Abstract method")
 
 
 class NotebookCells:
@@ -173,6 +181,22 @@ class FileNotebookCells(NotebookCells):
 
         # Extract only code cells.
         self.cells = [cell.source for cell in nb.cells if cell.cell_type == "code"]
+
+    def __getitem__(self, idx: int, /) -> NotebookCell:
+        return self.cells[idx]
+
+    def __len__(self) -> int:
+        return len(self.cells)
+
+
+class ScriptCells(NotebookCells):
+    def __init__(self, notebook_path: Path) -> None:
+        # Read notebook.
+        with open(notebook_path, "r") as f:
+            source = "".join(f.readlines())
+
+        # TODO: Parse and separate out statements (~cells) via AST.
+        self.cells = [source]
 
     def __getitem__(self, idx: int, /) -> NotebookCell:
         return self.cells[idx]
@@ -288,7 +312,7 @@ class Notebooks:
                 args.rmlist_elem_size,
                 args.rmlist_num_elem_mutate,
             )
-        if args.nb == "rmtree":
+        elif args.nb == "rmtree":
             return RandomMutatingTreeCells(
                 args.rmtree_num_cells,
                 int(args.rmtree_var_size),
@@ -298,8 +322,12 @@ class Notebooks:
                 args.rmtree_percent_elem_mutate,
             )
         else:
-            notebook_path = Path(args.nb)
-            return FileNotebookCells(notebook_path)
+            source_path = Path(args.nb)
+            if source_path.suffix == ".ipynb":
+                return FileNotebookCells(source_path)
+            elif source_path.suffix == ".py":
+                return ScriptCells(source_path)
+            raise ValueError(f"Target file has an invalid source extension {source_path}")
 
 
 class CodeCheckers:
@@ -312,16 +340,14 @@ class CodeCheckers:
         raise ValueError(f'Invalid code checker name "{args.auto_static_checker}"')
 
 
-class NotebookExecutor:
+class NotebookExecutor(ExperimentExecutor):
     def __init__(self, cells: NotebookCells, checker: StaticCodeChecker, the_globals: dict = {}) -> None:
+        ExperimentExecutor.__init__(self)
         self.cells = cells
         self.checker = checker
         self.the_globals = cast(ExperimentNamespace, the_globals)
         self.the_globals["__spec__"] = None
         self.the_globals["__builtins__"] = globals()["__builtins__"]
-
-    def num_cells(self) -> int:
-        return len(self.cells)
 
     def iter(self) -> Generator[Tuple[NotebookCell, ExperimentNamespace, str, str], None, None]:
         for cell in self.cells.iter():
@@ -349,6 +375,137 @@ class NotebookExecutor:
                 logger.error("Exception while executing...\n" f"{cell}\n" f"...with {traceback.format_exc()}")
                 sys.exit(2)
             yield cell, self.the_globals, stdout, stderr
+
+
+class PodSaveFunction:
+    def __init__(self, executor: Optional[ScriptExecutor]) -> None:
+        self.executor = executor
+
+    def __call__(self) -> None:  # __pod_save__
+        assert self.executor is not None
+
+        # Extract namespaces.
+        raw_frame = inspect.currentframe()
+        assert raw_frame is not None
+        raw_frame = raw_frame.f_back  # Step up once to skip __pod_save__ frame.
+        save_scopes: List[dict] = []
+        while raw_frame is not None and id(raw_frame) != self.executor._exec_frame_id:
+            save_scopes.append(raw_frame.f_locals)
+            raw_frame = raw_frame.f_back
+        save_scopes = save_scopes[::-1]  # Flip so the first scope is the global.
+
+        # HACK: Combine into the first namespace.
+        global_scope = save_scopes[0]
+        assert isinstance(global_scope, ExperimentNamespace)
+        for key in list(global_scope.keys()):
+            if key.startswith("stack::"):
+                del global_scope[key]
+        for stack_idx, local_scope in enumerate(save_scopes[1:]):
+            global_scope[f"stack::{stack_idx}"] = local_scope
+
+        # Yields and unblock.
+        self.executor._save_yield = global_scope
+        self.executor._save_yield_event.set()
+        self.executor._save_continue_event.wait()
+
+        # Now back from parent and ready to continue
+        self.executor._save_continue_event.clear()
+
+    def __reduce__(self):
+        # Skip saving and loading this class.
+        return lambda x: x, (None,)
+
+
+class ScriptExecutor(ExperimentExecutor):
+    def __init__(self, cells: NotebookCells, checker: StaticCodeChecker, sut: ObjectStorage) -> None:
+        ExperimentExecutor.__init__(self)
+        self.cells = cells
+        self.checker = checker
+        self.sut = sut
+        self.__pod_save__ = PodSaveFunction(self)
+
+        self.the_globals = self.sut.new_managed_namespace()
+        self.the_globals["__spec__"] = None
+        self.the_globals["__builtins__"] = globals()["__builtins__"]
+        self.the_globals["__pod_save__"] = self.__pod_save__
+
+        self._save_continue_event = threading.Event()
+        self._save_yield_event = threading.Event()
+        self._save_yield: Optional[ExperimentNamespace] = None
+        self._save_exception: Optional[Exception] = None
+
+        self._exec_frame_id: Optional[int] = None  # To be set at the beginning of execution.
+
+        # To be set while executing.
+        self._current_cell: Optional[str] = None
+        self._current_stdout_f: Optional[io.StringIO] = None
+        self._current_stderr_f: Optional[io.StringIO] = None
+
+    def iter(self) -> Generator[Tuple[NotebookCell, ExperimentNamespace, str, str], None, None]:
+        assert self._exec_frame_id is None, "ScriptExecutor can be iterated once."
+
+        # Start running the execution in a separate thread.
+        exec_thread = threading.Thread(target=self._run)
+        exec_thread.start()
+        while exec_thread.is_alive():
+            try:
+                global_scope = self._wait_yield()
+                if global_scope is not None:
+                    with (
+                        contextlib.redirect_stdout(sys.stdout),
+                        contextlib.redirect_stderr(sys.stderr),
+                    ):
+                        assert isinstance(self._current_cell, str)
+                        assert isinstance(self._current_stdout_f, io.StringIO)
+                        assert isinstance(self._current_stderr_f, io.StringIO)
+                        stdout = self._current_stdout_f.getvalue()
+                        stderr = self._current_stderr_f.getvalue()
+                        del self.the_globals["__pod_save__"]
+                        yield self._current_cell, global_scope, stdout, stderr
+                        self.the_globals["__pod_save__"] = self.__pod_save__
+                elif self._save_exception is not None:
+                    sys.exit(2)
+            finally:
+                self._continue_yield()
+
+    def _run(self) -> None:
+        try:
+            # Register this frame to truncate from saving.
+            self._exec_frame_id = id(sys._getframe())
+
+            # Run cell one by one.
+            for idx, cell in enumerate(self.cells.iter()):
+                # Preprocess cell.
+                self._current_cell = cell
+                with self.the_globals.set_managed(False):
+                    is_static = self.checker.is_static(cell, self.the_globals)
+
+                # Execute the cell.
+                try:
+                    with (
+                        contextlib.redirect_stdout(io.StringIO()) as stdout_f,
+                        contextlib.redirect_stderr(io.StringIO()) as stderr_f,
+                        self.the_globals.set_managed(not is_static),
+                    ):
+                        self._current_stdout_f = stdout_f
+                        self._current_stderr_f = stderr_f
+                        exec(cell, self.the_globals, self.the_globals)
+                except Exception as e:
+                    logger.error("Exception while executing...\n" f"{cell}\n" f"...with {traceback.format_exc()}")
+                    self._save_exception = e
+                    break
+        finally:
+            # Last yield.
+            self._save_yield = None
+            self._save_yield_event.set()
+
+    def _wait_yield(self) -> Optional[ExperimentNamespace]:
+        self._save_yield_event.wait()
+        return self._save_yield
+
+    def _continue_yield(self) -> None:
+        self._save_yield_event.clear()
+        self._save_continue_event.set()
 
 
 class BlockTimeout:
@@ -382,6 +539,18 @@ class SelectNamespace:
     def __exit__(self, type, value, traceback):
         with self.namespace.set_managed(False):
             self.namespace.update(self.excluded_items)
+
+
+def make_executor(args: BenchArgs, sut: ObjectStorage) -> ExperimentExecutor:
+    nb_cells = Notebooks.nb(args)
+    checker = CodeCheckers.checker(args)
+    namespace = sut.new_managed_namespace()
+    if args.podding_model == "roc-collect":
+        RoCFeatureCollectorModel.NAMESPACE = namespace
+    if isinstance(nb_cells, ScriptCells):
+        return ScriptExecutor(nb_cells, checker, sut)
+    else:
+        return NotebookExecutor(nb_cells, checker, the_globals=namespace)
 
 
 """ Systems under test """
@@ -537,13 +706,8 @@ def run_exp1_impl(args: BenchArgs) -> None:
     # Setup storage system under test.
     sut = SUT.sut(args)
 
-    # Load notebook.
-    nb_cells = Notebooks.nb(args)
-    checker = CodeCheckers.checker(args)
-    namespace = sut.new_managed_namespace()
-    nb_exec = NotebookExecutor(nb_cells, checker, the_globals=namespace)
-    if args.podding_model == "roc-collect":
-        RoCFeatureCollectorModel.NAMESPACE = namespace
+    # Load notebook and executor.
+    nb_exec = make_executor(args, sut)
 
     # Filter out excluded variable names.
     excluded_save_names: Set[str] = set()
@@ -573,10 +737,15 @@ def run_exp1_impl(args: BenchArgs) -> None:
     tids: List[TimeId] = []
     nb_exec_step = nb_exec.iter()
     exec_start_ts = time.time()
-    for nth in range(nb_exec.num_cells()):
+    nth = -1
+    while True:
         # Execute next cell.
+        nth += 1
         exec_start_ts = time.time()
-        cell, the_globals, stdout, stderr = next(nb_exec_step)
+        try:
+            cell, the_globals, stdout, stderr = next(nb_exec_step)
+        except StopIteration:
+            break
         exec_stop_ts = time.time()
 
         # Dump current state.

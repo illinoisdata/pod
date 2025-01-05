@@ -13,6 +13,6 @@ sleep 3
 
 export POD_NBDATA=${DATA_VOLUME}
 docker build -t podnogil -f experiments/podnogil.Dockerfile . && \
-    docker build -t pod -f experiments/pod.Dockerfile . && \
+    # docker build -t pod -f experiments/pod.Dockerfile . && \
     docker build -t pod39 -f experiments/pod39.Dockerfile . && \
     docker compose -f experiments/docker-compose.yml -p ${COMPOSE_NAME} up

@@ -1,4 +1,4 @@
-# Chipmink: Partial Object Store for Temporal Exploration on Notebooks
+# Chipmink: Efficient Object Store with Graph-based Deltas
 
 At the core to enable notebook version control, environment migrations, and collaborative data analysis, we need a new type of storage to store and retrieve Python variables efficiently. It must be able to manage many variable versions as the number of notebook cell executions and gracefully handle variable dependency with potentially shared and/or unserializable objects. Existing solutions like ad hoc saving/loading, snapshotting, or restart/re-execution are incomplete, inaccurate, or unscalable.
 
@@ -52,6 +52,9 @@ On a separate terminal, run all the experiments. Measurements will be collected 
 export output=log.txt
 (docker compose -f experiments/docker-compose.yml -p pod_${USER} exec podnogil bash experiments/bench_exp1.sh snp,dill,shev,zosp,zodb,criu,crii,pga,pfl,pfa,pg0,pg1,pgcache0,pgcache0noavf,pgcache0,pgcache4,pgcache16,pgcache64,pgcache256,pgcache1024,pgcache4096,pgcache16384,pgcache65536,pgcache262144,pgcache1048576,pgl,pglnoavlstatic,pglnostatic,pgnoavf,pgnoavl,pgnoavlstatic,pgnostatic,pnb,pnv,prand skltweet,ai4code,agripred,msciedaw,ecomsmph) 2>& 1 | tee -a $output
 
+# Batch scripts
+(docker compose -f experiments/docker-compose.yml -p pod_${USER} exec podnogil bash experiments/bench_exp1.sh snp,shev,zosp,zodb,criu,crii,pga netmnist,rlactcri,vaenet,tseqpred,wordlang) 2>& 1 | tee -a $output
+
 # Selective Saving
 (docker compose -f experiments/docker-compose.yml -p pod_${USER} exec podnogil bash experiments/bench_exp1.sh snp,shev,zosp,zodb,criu,crii,pga skltweet[exc],ai4code[exc],agripred[exc],msciedaw[exc],ecomsmph[exc]) 2>& 1 | tee -a $output
 
@@ -76,7 +79,7 @@ Next, run `plot.ipynb` to format the results.
 
 Finally, compile the plots using the following command.
 ```bash
-(cd plots && pdflatex plot.tex && open plot.pdf)
+make plot
 ```
 
 ## Development

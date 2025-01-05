@@ -4,18 +4,13 @@ import pod.__pickle__  # noqa, isort:skip
 from pathlib import Path
 
 from pod._pod import AsyncPodObjectStorage
-from pod.model import GreedyPoddingModel, LightGBMClassifierRoC
-from pod.pickling import StaticPodPickling
+from pod.pickling import ManualPodding, StaticPodPickling
 from pod.storage import FilePodStorage
 
-__DEFAULT_MODEL__ = GreedyPoddingModel(
-    roc_model=LightGBMClassifierRoC.load_from(Path("models/roc_lgb.txt")),
-    pod_overhead=1200,
-)
 __DEFAULT_PICKLING__ = StaticPodPickling(
     FilePodStorage(Path("/tmp/chipmink")),
-    podding_fn=__DEFAULT_MODEL__.podding_fn,
-    post_podding_fn=__DEFAULT_MODEL__.post_podding_fn,
+    podding_fn=ManualPodding.podding_fn,
+    post_podding_fn=None,
 )
 __DEFAULT_POD__ = AsyncPodObjectStorage(
     __DEFAULT_PICKLING__,

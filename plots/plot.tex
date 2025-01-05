@@ -1,15 +1,6 @@
 \documentclass[sigconf,nonacm,screen]{acmart}
 
-\title{Experiment Figures in\\Chipmink: Partial Object Store for Temporal Exploration on Notebooks}
-\author[Supawit Chockchowwat, Sumay Thakurdesai, Zhaoheng Li, Matthew S. Krafczyk, Yongjoo Park]{Supawit Chockchowwat, Sumay Thakurdesai, Zhaoheng Li, Matthew S. Krafczyk, Yongjoo Park}
-\affiliation{%
-  \institution{University of Illinois at Urbana-Champaign}
-  \streetaddress{201 N. Goodwin Ave.}
-  \city{Urbana}
-  \state{Illinois}
-  \country{United States}
-}
-\email{{supawit2,sumayst2,zl20,mkrafcz2,yongjoo}@illinois.edu}
+\title{Experiment Figures in\\Chipmink: Efficient Object Store with Graph-based Deltas}
 
 \usepackage{graphicx}
 \usepackage{caption}
@@ -34,6 +25,7 @@
 
 % Read data
 \pgfplotstableread{./exp_i.txt}{\tableexpi}
+\pgfplotstableread{./exp_i_script.txt}{\tableexpiscript}
 \pgfplotstableread{./exp_i_skltweet.txt}{\tableexpiskltweet}
 \pgfplotstableread{./exp_ii.txt}{\tableexpii}
 \pgfplotstableread{./exp_ii_cache.txt}{\tableexpiicache}

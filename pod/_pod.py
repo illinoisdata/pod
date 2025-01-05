@@ -60,7 +60,7 @@ class ExperimentNamespace(Namespace):
 
 
 class ObjectStorage:
-    def new_managed_namespace(self, namespace: Namespace = {}) -> Namespace:
+    def new_managed_namespace(self, namespace: Namespace = {}) -> ExperimentNamespace:
         return ExperimentNamespace(namespace)
 
     def save(self, namespace: Namespace) -> TimeId:
@@ -550,7 +550,7 @@ class PodNamespace(ExperimentNamespace):
         return dict.items(self)
 
     def pod_active_names(self) -> Set[str]:
-        return self.active_names
+        return self.active_names - {"__pod_save__"}
 
     def pod_namemap(self) -> Namemap:
         return self.namemap
@@ -581,7 +581,7 @@ class PodObjectStorage(ObjectStorage):
         )
         return PodObjectStorage(pickling)
 
-    def new_managed_namespace(self, namespace: Namespace = {}) -> Namespace:
+    def new_managed_namespace(self, namespace: Namespace = {}) -> ExperimentNamespace:
         return PodNamespace(namespace)
 
     def save(self, namespace: Namespace) -> TimeId:
@@ -606,7 +606,7 @@ class PodObjectStorage(ObjectStorage):
 
         if self._active_filter and isinstance(namespace, PodNamespace):
             active_names = self._connected_active_names(tid, namespace)
-            # logger.warning(f"{active_names=}")
+            logger.warning(f"{active_names=}")
             prev_namemap = namespace.pod_namemap()
             active_namemap = {
                 name: PodId(tid, id(dict.__getitem__(namespace, name))) for name in namespace.keys() if name in active_names
@@ -808,7 +808,7 @@ class AsyncPodObjectStorage(PodObjectStorage):
     def new(pod_dir: Path) -> PodObjectStorage:
         return AsyncPodObjectStorage.new(pod_dir)
 
-    def new_managed_namespace(self, namespace: Namespace = {}) -> Namespace:
+    def new_managed_namespace(self, namespace: Namespace = {}) -> ExperimentNamespace:
         return AsyncPodNamespace(self, namespace)
 
     def save(self, namespace: Namespace) -> TimeId:
