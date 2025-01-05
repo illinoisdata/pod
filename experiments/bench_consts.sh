@@ -7,8 +7,12 @@ POD_DIR=/tmp/pod
 ############
 
 NB_MAP=(
+    ## Synthetic notebooks
+
     "rmlist rmlist"
     "rmtree rmtree"
+
+    ## Jupyter notebooks
 
     "nbreadon notebooks/nb_readon.ipynb"
     "nbupdate notebooks/nb_update.ipynb"
@@ -32,6 +36,21 @@ NB_MAP=(
     "ecomsmph notebooks/e-comm-data-mining-for-smartphone-products.ipynb"
     "amexdata notebooks/amex-dataset.ipynb"
     "msciedaw notebooks/msci-eda-which-makes-sense.ipynb"
+
+    ## Python scripts.
+
+    "srmlist notebooks/script_rmlist.py"
+    "pystone notebooks/pystone.py"
+    "nbody notebooks/nbody.py"
+    "spnorm notebooks/spectralnorm.py"
+
+    "netmnist notebooks/torch_mnist.py"
+    "rlactcri notebooks/torch_actor_critic.py"
+    "vaenet notebooks/torch_vae.py"
+    "siamese notebooks/torch_siamese_network.py"
+    "wordlang notebooks/torch_word_language_model.py"
+    "tseqpred notebooks/torch_time_sequence_prediction.py"
+    # "langtlsl notebooks/torch_language_translation.py"
 )
 
 # Parse into two arrays.

@@ -82,7 +82,7 @@
                 \addlegendimage{ploadsnp}
                 \addlegendentry{Existing Snapshotting}
                 \addlegendimage{ploadpos}
-                \addlegendentry{Partial Object Store}
+                \addlegendentry{Structure-aware Deltas}
             };
         \end{axis}
         \end{tikzpicture}
@@ -135,14 +135,14 @@
             \addplot[ploadpos] table [x=cell,y=pga_save_s] {\tableexpipercellecomsmph};
             % \addlegendentry{\pos}
 
-            \path (axis cs:30, 1000) -- node[above, sloped, text=cNegativemain, font=\scriptsize] {17 min.} (axis cs:41, 1000);
+            \path (axis cs:30, 1000) -- node[above, sloped, text=cNegativemain, font=\scriptsize] {18 min.} (axis cs:41, 1000);
             % \draw[thick, dashed, color=cZmain] 
             % (axis cs:0, 2) -- node[below, sloped, pos=0.26, text=cZmain, font=\scriptsize] {2 sec.} (axis cs:40, 2);
             \draw[thick, dashed, color=cZmain] 
             (axis cs:0, 23) -- node[above, sloped, pos=0.50, text=cZmain, font=\scriptsize] {23 sec.} (axis cs:40, 23);
         \end{axis}
         \end{tikzpicture}
-        % \vspace{-2mm}
+        \vspace{-2mm}
         \caption{Saving times}
         \label{fig:costpercell_save}
     \end{subfigure}
@@ -173,12 +173,17 @@
             (axis cs:0, 23) -- node[above, sloped, pos=0.50, text=cZmain, font=\scriptsize] {23 sec.} (axis cs:40, 23);
         \end{axis}
         \end{tikzpicture}
-        % \vspace{-2mm}
+        \vspace{-2mm}
         \caption{Loading times}
         \label{fig:costpercell_load}
     \end{subfigure}
     \vspace{-6mm}
-    \caption{\fix{Temporal exploration is feasible on partial object stores; users set aside smaller storage space and perceive fewer saving and loading delays compared to temporal exploration on snapshotting. Plots show cumulative storage sizes and saving times as a user runs \ecomsmph notebook as well as loading times when the user inspects variables referred by each cell.}}
+    \caption{Graph-based deltas improve efficiency:
+    smaller storage space and faster saving/loading 
+        compared to complete snapshotting. 
+    Plots show (a) cumulative storage sizes, 
+        (b) saving times as a user runs \ecomsmph notebook, and
+        (c) loading times when the user inspects variables referred by each cell.}
     \label{fig:costpercell}
     \vspace{\undercaptionspace}
 \end{figure*}

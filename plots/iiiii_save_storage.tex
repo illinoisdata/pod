@@ -46,45 +46,45 @@
             bar width=0.08,
             axis lines=left,
             % xlabel=Number of Objects,
-            ylabel=Storage (GB),
+            ylabel=Save Time (s),
             ymajorgrids,
             % yminorgrids,
             % xmin=1000,
             % xmax=40000000,
             ymode=log,
-            ymin=0.01,
+            ymin=0.1,
             ymax=15000,
             log origin=infty,
             enlarge x limits=0.15,
-            ytick={0.01, 0.1, 1, 10, 100, 1000, 10000, 100000},
+            ytick={0.1, 1.0, 10, 100, 1000, 10000},
             xtick={data},
-            xticklabels from table={\tableexpv}{nb},
+            xticklabels from table={\tableexpi}{nb},
             % x tick label style={rotate=20, anchor=north},
             nodes near coords,
             point meta=explicit symbolic,
             nodes near coords style={font=\scriptsize, align=left, rotate=90, anchor=west},
             legend columns=2,
-            legend style={at={(0.03,1.0)},anchor=north west}
+            legend style={at={(0.03,1.0)},anchor=north west},
+            label style={font=\normallabelsize},
+            every tick label/.append style={font=\normallabelsize},
         ]
-            \addplot[bardill] table [x=index,y=dill_storage_gb] {\tableexpv};
+            \addplot[bardill] table [x=index,y=dill_avg_save_s] {\tableexpi};
             % \addlegendentry{\dill}
-            \addplot[barshev] table [x=index,y=shev_storage_gb] {\tableexpv};
+            \addplot[barshev] table [x=index,y=shev_avg_save_s] {\tableexpi};
             % \addlegendentry{\shev}
-            \addplot[barzosp] table [x=index,y=zosp_storage_gb] {\tableexpv};
+            \addplot[barzosp] table [x=index,y=zosp_avg_save_s] {\tableexpi};
             % \addlegendentry{\zosp}
-            \addplot[barzodb] table [x=index,y=zodb_storage_gb] {\tableexpv};
+            \addplot[barzodb] table [x=index,y=zodb_avg_save_s] {\tableexpi};
             % \addlegendentry{\zodb}
-            \addplot[barcriu] table [x=index,y=criu_storage_gb] {\tableexpv};
+            \addplot[barcriu] table [x=index,y=criu_avg_save_s] {\tableexpi};
             % \addlegendentry{\criu}
-            \addplot[barpga] table [x=index,y=pga_storage_gb,meta=pga_rel_storage_gb] {\tableexpv};
+            \addplot[barpga] table [x=index,y=pga_avg_save_s,meta=pga_rel_avg_save_s] {\tableexpi};
             % \addlegendentry{\pga (Ours)}
-            
-            \node[draw=black, text=black, font=\normalsize, fill=white, anchor=north] at (rel axis cs:0.5, 0.98) {Exclude dataset variables};
         \end{axis}
         \end{tikzpicture}
         \vspace{-3mm}
-        \caption{Total storage size}
-        \label{fig:exp_i_storage}
+        \caption{Average saving time}
+        \label{fig:exp_i_save}
     \end{subfigure}
     \begin{subfigure}[b]{\subfigwidth}
         \begin{tikzpicture}
@@ -113,7 +113,9 @@
             point meta=explicit symbolic,
             nodes near coords style={font=\scriptsize, align=left, rotate=90, anchor=west},
             legend columns=2,
-            legend style={at={(0.03,1.0)},anchor=north west}
+            legend style={at={(0.03,1.0)},anchor=north west},
+            label style={font=\normallabelsize},
+            every tick label/.append style={font=\normallabelsize},
         ]
             \addplot[bardill] table [x=index,y=dill_avg_save_s] {\tableexpv};
             % \addlegendentry{\dill}
@@ -128,15 +130,15 @@
             \addplot[barpga] table [x=index,y=pga_avg_save_s,meta=pga_rel_avg_save_s] {\tableexpv};
             % \addlegendentry{\pga (Ours)}
             
-            \node[draw=black, text=black, font=\normalsize, fill=white, anchor=north] at (rel axis cs:0.5, 0.98) {Exclude dataset variables};
+            \node[draw=black, text=black, font=\small, fill=white, anchor=north] at (rel axis cs:0.5, 0.98) {Exclude dataset variables};
         \end{axis}
         \end{tikzpicture}
         \vspace{-3mm}
-        \caption{Average overhead saving time}
-        \label{fig:exp_i_save}
+        \caption{Average saving time (excluding dataset variables)}
+        \label{fig:exp_v_save}
     \end{subfigure}
     \vspace{-3mm}
-    \caption{\fix{Even when users selectively save some variables and exclude read-only dataset, \pga still compactly and quickly stores them, 3.5--36.3$\times$ smaller and 3.6--14.4$\times$ faster than the best baselines.}}
-    \label{fig:exp_v_selective}
+    \caption{\pga stores all variables 2.7--12.4$\times$ faster and selected variables 3.6--14.4$\times$ faster than the best baselines. The plots show the delay incurred for each cell when saving all variables (left) and saving all but read-only dataset variables (right).}
+    \label{fig:exp_save}
     \vspace{\undercaptionspace}
 \end{figure*}

@@ -16,13 +16,17 @@ from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 import lz4.frame as zlib
 import neo4j
-import psycopg2
 import pymongo
 import redis
 import xxhash
 from dataclasses_json import dataclass_json
 from loguru import logger
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+
+try:
+    import psycopg2
+    from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+except ImportError:
+    logger.warning("Failed to import psycopg2")
 
 from pod.algo import union_find
 from pod.common import PodDependency, PodId
@@ -124,7 +128,7 @@ class PodBytesMemo:
             self.size -= len(popped_pod_bytes)
 
     def __reduce__(self):
-        return self.__class__, (self.max_size, self.size, self.memo_page)
+        return self.__class__, (self.max_size, self.min_size, self.size, self.memo_page)
 
 
 PodIdSynonym = Dict[PodId, PodId]

@@ -100,3 +100,8 @@ docs:             ## Build the documentation.
 	@echo "building documentation ..."
 	@$(ENV_PREFIX)mkdocs build
 	URL="site/index.html"; xdg-open $$URL || sensible-browser $$URL || x-www-browser $$URL || gnome-open $$URL || open $$URL
+
+.PHONY: plot
+plot:       ## Make plots from experiment results
+	@cd plots && pdflatex plot.tex
+	@open plots/plot.pdf

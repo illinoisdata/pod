@@ -83,7 +83,7 @@
         \end{axis}
         \end{tikzpicture}
         \vspace{-4mm}
-        \caption{Total storage usage}
+        \caption{Total storage usage (notebooks)}
         \label{fig:exp_i_storage}
     \end{subfigure}
     \begin{subfigure}[b]{\subfigwidth}
@@ -101,13 +101,13 @@
             % xmin=1000,
             % xmax=40000000,
             ymode=log,
-            ymin=0.1,
-            ymax=1500,
+            ymin=0.001,
+            ymax=150,
             log origin=infty,
             enlarge x limits=0.15,
-            ytick={0.01, 0.1, 1, 10, 100, 1000, 10000, 100000},
+            ytick={0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000, 100000},
             xtick={data},
-            xticklabels from table={\tableexpv}{nb},
+            xticklabels from table={\tableexpiscript}{nb},
             % x tick label style={rotate=20, anchor=north},
             nodes near coords,
             point meta=explicit symbolic,
@@ -117,28 +117,26 @@
             label style={font=\normallabelsize},
             every tick label/.append style={font=\normallabelsize},
         ]
-            \addplot[bardill] table [x=index,y=dill_storage_gb] {\tableexpv};
+            \addplot[bardill] table [x=index,y=dill_storage_gb] {\tableexpiscript};
             % \addlegendentry{\dill}
-            \addplot[barshev] table [x=index,y=shev_storage_gb] {\tableexpv};
+            \addplot[barshev] table [x=index,y=shev_storage_gb] {\tableexpiscript};
             % \addlegendentry{\shev}
-            \addplot[barzosp] table [x=index,y=zosp_storage_gb] {\tableexpv};
+            \addplot[barzosp] table [x=index,y=zosp_storage_gb] {\tableexpiscript};
             % \addlegendentry{\zosp}
-            \addplot[barzodb] table [x=index,y=zodb_storage_gb] {\tableexpv};
+            \addplot[barzodb] table [x=index,y=zodb_storage_gb] {\tableexpiscript};
             % \addlegendentry{\zodb}
-            \addplot[barcriu] table [x=index,y=criu_storage_gb] {\tableexpv};
+            \addplot[barcriu] table [x=index,y=criu_storage_gb] {\tableexpiscript};
             % \addlegendentry{\criu}
-            \addplot[barpga] table [x=index,y=pga_storage_gb,meta=pga_rel_storage_gb] {\tableexpv};
+            \addplot[barpga] table [x=index,y=pga_storage_gb,meta=pga_rel_storage_gb] {\tableexpiscript};
             % \addlegendentry{\pga (Ours)}
-            
-            \node[draw=black, text=black, font=\footnotesize, fill=white, anchor=north] at (rel axis cs:0.5, 1.0) {Exclude dataset variables};
         \end{axis}
         \end{tikzpicture}
         \vspace{-4mm}
-        \caption{Total storage usage (excluding dataset variables)}
+        \caption{Total storage usage (scripts)}
         \label{fig:exp_v_storage}
     \end{subfigure}
     \vspace{-3mm}
-    \caption{\fix{\pga stores all variables 5.7--36.5$\times$ smaller and selected variables 3.5--36.3$\times$ smaller than the best baselines. The plots show the total storage required when saving all variables (left) and saving all but read-only dataset variables (right).}}
+    \caption{\pga stores all variables with 5.7--36.5$\times$ smaller storage on notebooks and 1.4--29.3$\times$ smaller on scripts than the best baselines. The plots show the total storage required when saving all variables in the namespace at different points in time.}
     \label{fig:exp_storage}
     \vspace{\undercaptionspace}
 \end{figure*}
