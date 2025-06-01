@@ -28,6 +28,7 @@ except ImportError as e:
     logger.warning(f"Missing pycriu: {e}, but skipping for now")
 
 from pod.common import Object, PodId, TimeId, step_time_id
+from pod.feature import __FEATURE__
 from pod.model import FixedDecisionPoddingModel
 from pod.pickling import ManualPodding, ManyPodPickling, PodPickling, SnapshotPodPickling, StaticPodPickling
 from pod.stats import ExpStat
@@ -603,10 +604,12 @@ class PodObjectStorage(ObjectStorage):
 
     def _save_as_namemap(self, tid: TimeId, namespace: Namespace) -> Tuple[PodId, Namemap]:
         namemap_pid = PodId(tid, PodObjectStorage.NAMEMAP_OID)
+        if isinstance(namespace, PodNamespace):
+            logger.info(f"accessed_names= {namespace.pod_active_names()}")
 
         if self._active_filter and isinstance(namespace, PodNamespace):
             active_names = self._connected_active_names(tid, namespace)
-            logger.warning(f"{active_names=}")
+            logger.info(f"{active_names=}")
             prev_namemap = namespace.pod_namemap()
             active_namemap = {
                 name: PodId(tid, id(dict.__getitem__(namespace, name))) for name in namespace.keys() if name in active_names
@@ -634,6 +637,9 @@ class PodObjectStorage(ObjectStorage):
             for name, pid in new_namepids:  # This save objects in alphabetical order.
                 obj = podspace[pid]
                 dump_session.dump(pid, obj)
+            if __FEATURE__.is_enabled:
+                for name, obj in dict.items(namespace):
+                    __FEATURE__.new_variable(name, id(obj))
 
     def _load_objects(self, namemap: Namemap) -> Namespace:
         obj_by_pid = self._pickling.load_batch({pid for name, pid in namemap.items()})

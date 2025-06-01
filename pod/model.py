@@ -15,7 +15,7 @@ import pandas as pd
 from loguru import logger
 from xgboost import XGBRegressor
 
-from pod.common import Object, ObjectId, PodId
+from pod.common import Object, ObjectId, PodDependencyMap, PodId
 from pod.feature import __FEATURE__
 from pod.pickling import BasePickler, PodAction, PoddingFunction
 
@@ -220,7 +220,7 @@ class GreedyPoddingModel(ConservativePoddingModel):
             return PodAction.split_final
         raise ValueError(f"Unreachable min({bundle_cost}, {split_cost}, {split_final_cost}) = {min_cost}")
 
-    def post_podding_fn(self) -> None:
+    def post_podding_fn(self, dependency_map: PodDependencyMap) -> None:
         _post_podding_fn = getattr(super(), "post_podding_fn", None)
         if _post_podding_fn is not None:
             _post_podding_fn()
@@ -272,7 +272,7 @@ class FeatureCollectorModel:
         self.features["obj_len"].append(self._get_obj_len(obj))
         return self._podding_fn(obj, pickler)
 
-    def post_podding_fn(self) -> None:
+    def post_podding_fn(self, dependency_map: PodDependencyMap) -> None:
         for oid in self.features["oid"][len(self.features["has_changed"]) :]:
             self.features["has_changed"].append(__FEATURE__.has_changed(oid))
         self.save(save_path=self._save_path)
@@ -311,9 +311,12 @@ class FeatureCollectorModel:
 class RoCFeatureCollectorModel:
     NAMESPACE: Dict[str, Object] = {}
 
-    def __init__(self, feature_path: Path, change_path: Path) -> None:
+    def __init__(self, feature_path: Path, change_path: Path, dep_path: Path, var_path: Path) -> None:
         self._feature_path = feature_path
         self._change_path = change_path
+        self._dep_path = dep_path
+        self._var_path = var_path
+        self.dump_th = 0
         self.oid_counters: Dict[int, int] = {}
         self.features: Dict[str, list] = {
             "oid": [],
@@ -333,8 +336,21 @@ class RoCFeatureCollectorModel:
         }
         self.changes: Dict[str, list] = {
             "oid": [],
+            "root_oid": [],
             "nth": [],
+            "dump_th": [],
             "has_changed": [],
+        }
+        self.deps: Dict[str, list] = {
+            "nth": [],
+            "dump_th": [],
+            "from_root_oid": [],
+            "to_root_oid": [],
+        }
+        self.vars: Dict[str, list] = {
+            "dump_th": [],
+            "varname": [],
+            "oid": [],
         }
 
         assert __FEATURE__.is_enabled and "track_change" in __FEATURE__.cfg
@@ -365,12 +381,30 @@ class RoCFeatureCollectorModel:
             self.features["len_slots"].append(self._get_obj_len_slots(obj))
         return PodAction.split
 
-    def post_podding_fn(self) -> None:
+    def post_podding_fn(self, dependency_map: PodDependencyMap) -> None:
+        pids: Dict[PodId, int] = {}
+        for varname, oid in __FEATURE__.variables().items():
+            self.vars["dump_th"].append(self.dump_th)
+            self.vars["varname"].append(varname)
+            self.vars["oid"].append(oid)
         for oid in self.oid_counters:
+            pid = __FEATURE__.pid_for_oid(oid)
+            pids[pid] = self.oid_counters[oid]
             self.changes["oid"].append(oid)
+            self.changes["root_oid"].append(pid.oid)
             self.changes["nth"].append(self.oid_counters[oid])
+            self.changes["dump_th"].append(self.dump_th)
             self.changes["has_changed"].append(__FEATURE__.has_changed(oid))
             self.oid_counters[oid] += 1
+        for from_pid, nth in pids.items():
+            if from_pid not in dependency_map:
+                continue
+            for to_pid in dependency_map[from_pid].dep_pids:
+                self.deps["nth"].append(nth)
+                self.deps["dump_th"].append(self.dump_th)
+                self.deps["from_root_oid"].append(from_pid.oid)
+                self.deps["to_root_oid"].append(to_pid.oid)
+        self.dump_th += 1
         self.save()
 
     def save(self) -> None:
@@ -378,6 +412,10 @@ class RoCFeatureCollectorModel:
         pd.DataFrame(self.features).to_csv(self._feature_path)
         self._change_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(self.changes).to_csv(self._change_path)
+        self._dep_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(self.deps).to_csv(self._dep_path)
+        self._var_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(self.vars).to_csv(self._var_path)
 
     def _get_dispatch_table(self, pickler: BasePickler) -> dict:
         return getattr(pickler, "dispatch_table", dispatch_table)

@@ -406,10 +406,10 @@ function get_sut_args() {
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --sut_async --pod_noop"
     elif [[ $_SUT == "pflc" ]]
     then
-        sut_args="--sut pod_file --pod_dir ${POD_DIR} --enable_feature --podding_model manual-collect"
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --enable_feature --podding_model manual-collect --pod_active_filter False --auto_static_checker always --always_lock_all True"
     elif [[ $_SUT == "prcc" ]]
     then
-        sut_args="--sut pod_file --pod_dir ${POD_DIR} --enable_feature --podding_model roc-collect"
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --enable_feature --podding_model roc-collect --pod_active_filter False --auto_static_checker always --always_lock_all True"
     else
         echo "ERROR (get_sut_args): Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1

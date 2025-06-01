@@ -23,11 +23,14 @@ class ChangeTracker:
         self._prev_pod_set: Set[bytes] = set()
         self._pod_set: Set[bytes] = set()
         self._pod_oids: Dict[PodId, Set[ObjectId]] = {}
+        self._oid_to_pid: Dict[ObjectId, PodId] = {}
         self._pod_max_change_prob: Dict[PodId, float] = {}
         self._oid_recent_change: Set[ObjectId] = set()
 
         self._oid_count: Dict[ObjectId, int] = {}
         self._oid_change_count: Dict[ObjectId, int] = {}
+
+        self._varname_to_oid: Dict[str, ObjectId] = {}
 
     def new_dump(self):
         self._prev_pod_set |= self._pod_set
@@ -35,11 +38,13 @@ class ChangeTracker:
         self._pod_oids = {}
         self._oid_recent_change = set()
         self._pod_max_change_prob = {}
+        self._varname_to_oid = {}
 
     def new_pod_oid(self, pid: PodId, oid: ObjectId):
         if pid not in self._pod_oids:
             self._pod_oids[pid] = set()
         self._pod_oids[pid].add(oid)
+        self._oid_to_pid[oid] = pid
         self._pod_max_change_prob[pid] = max(
             self._pod_max_change_prob.get(pid, 0.0),
             self.oid_change_prob(oid),
@@ -56,6 +61,12 @@ class ChangeTracker:
             if is_changed:
                 self._oid_change_count[oid] += 1
                 self._oid_recent_change.add(oid)
+
+    def new_variable(self, varname: str, oid: ObjectId):
+        self._varname_to_oid[varname] = oid
+
+    def pid_for_oid(self, oid: ObjectId) -> PodId:
+        return self._oid_to_pid[oid]
 
     def pod_max_change_prob(self, pid: PodId) -> float:
         return self._pod_max_change_prob.get(pid, 0.0)
@@ -76,6 +87,9 @@ class ChangeTracker:
 
     def has_changed(self, oid: ObjectId) -> bool:
         return oid in self._oid_recent_change
+
+    def variables(self) -> Dict[str, ObjectId]:
+        return self._varname_to_oid
 
 
 class _Feature:
@@ -124,12 +138,23 @@ class _Feature:
         if self.cfg.get("track_change"):
             self._track_change.new_pod(pid, pod_bytes)
 
+    @when_enabled
+    def new_variable(self, varname: str, oid: ObjectId):
+        if self.cfg.get("track_change"):
+            self._track_change.new_variable(varname, oid)
+
     """ Feature retrieval. """
 
     @when_enabled
     def pod_max_change_prob(self, pid: PodId) -> Optional[float]:
         if self.cfg.get("track_change"):
             return self._track_change.pod_max_change_prob(pid)
+        return None
+
+    @when_enabled
+    def pid_for_oid(self, oid: ObjectId) -> Optional[PodId]:
+        if self.cfg.get("track_change"):
+            return self._track_change.pid_for_oid(oid)
         return None
 
     @when_enabled
@@ -160,6 +185,12 @@ class _Feature:
     def has_changed(self, oid: ObjectId) -> Optional[bool]:
         if self.cfg.get("track_change"):
             return self._track_change.has_changed(oid)
+        return None
+
+    @when_enabled
+    def variables(self) -> Optional[Dict[str, ObjectId]]:
+        if self.cfg.get("track_change"):
+            return self._track_change.variables()
         return None
 
 

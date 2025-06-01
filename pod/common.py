@@ -72,7 +72,10 @@ class PodDependency:
         return self.__class__, (self.dep_pids, self.rank, self.meta, self.immutable)
 
 
-def plot_deps(deps: Dict[PodId, PodDependency]):
+PodDependencyMap = Dict[PodId, PodDependency]
+
+
+def plot_deps(deps: PodDependencyMap):
     ps = graphviz.Digraph()
     for pid in deps:
         ps.node(str(pid))
