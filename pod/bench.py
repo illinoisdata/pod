@@ -596,6 +596,8 @@ class SUT:
             rocc_model = RoCFeatureCollectorModel(
                 args.result_dir / args.expname / "roc-collect" / "feature.csv",
                 args.result_dir / args.expname / "roc-collect" / "change.csv",
+                args.result_dir / args.expname / "roc-collect" / "dep.csv",
+                args.result_dir / args.expname / "roc-collect" / "var.csv",
             )
             return rocc_model.podding_fn, rocc_model.post_podding_fn
         raise ValueError(f'Invalid model name "{args.podding_model}"')

@@ -19,7 +19,7 @@ import pandas as pd
 import xdelta3
 from loguru import logger
 
-from pod.common import Object, ObjectId, PodDependency, PodId, TimeId, next_rank, step_time_id
+from pod.common import Object, ObjectId, PodDependency, PodDependencyMap, PodId, TimeId, next_rank, step_time_id
 from pod.feature import __FEATURE__
 from pod.memo import MemoId, MemoPageAllocator, StaticPodPicklerMemo, StaticPodUnpicklerMemo
 from pod.storage import PodReader, PodStorage, PodWriter
@@ -260,7 +260,7 @@ class PodAction(enum.Enum):
 
 
 PoddingFunction = Callable[[Object, BasePickler], PodAction]
-PostPoddingFunction = Callable[[], None]
+PostPoddingFunction = Callable[[PodDependencyMap], None]
 
 
 class ManualPodding:
@@ -335,7 +335,7 @@ class ManualPodding:
 class StaticPodPicklerContext:
     root_oids: Set[ObjectId]
     seen_oid: Set[ObjectId]
-    dependency_maps: Dict[PodId, PodDependency]
+    dependency_map: PodDependencyMap
     memo: StaticPodPicklerMemo
     cached_pod_actions: Dict[ObjectId, PodAction]
     podding_fn: PoddingFunction
@@ -346,7 +346,7 @@ class StaticPodPicklerContext:
         return StaticPodPicklerContext(
             root_oids=root_oids,
             seen_oid=set(),
-            dependency_maps={},
+            dependency_map={},
             memo=StaticPodPicklerMemo(),
             cached_pod_actions={},
             podding_fn=ManualPodding.podding_fn,
@@ -517,10 +517,14 @@ class StaticPodPickler(BaseStaticPodPickler):
         if isinstance(obj, StaticPodPickler.MUST_BUNDLE_TYPES):
             # Always bundle these types without checking the action cache.
             # __FEATURE__.new_pod_oid(self.root_pid, id(obj))
+            if __FEATURE__.is_enabled:
+                __FEATURE__.new_pod_oid(self.root_pid, id(obj))
             return None
 
         pod_action = self.safe_podding_fn(obj)
         if pod_action == PodAction.bundle:
+            if __FEATURE__.is_enabled:
+                __FEATURE__.new_pod_oid(self.root_pid, id(obj))
             return None
 
         # Split and split final.
@@ -549,8 +553,6 @@ class StaticPodPickler(BaseStaticPodPickler):
                 self.ctx.cached_pod_actions[oid] = PodAction.bundle
             else:
                 self.ctx.cached_pod_actions[oid] = self.ctx.podding_fn(obj, self)
-                if __FEATURE__.is_enabled and self.ctx.cached_pod_actions[oid] == PodAction.bundle:
-                    __FEATURE__.new_pod_oid(self.root_pid, id(obj))
         return self.ctx.cached_pod_actions[oid]
 
     def get_root_dep(self) -> PodDependency:
@@ -592,10 +594,10 @@ class StaticPodPickler(BaseStaticPodPickler):
         # Write to pod storage.
         __FEATURE__.new_pod(this_pid, this_pod_bytes)
         writer.write_pod(this_pid, this_pod_bytes)
-        ctx.dependency_maps[this_pid] = this_dep
+        ctx.dependency_map[this_pid] = this_dep
 
         assert (
-            this_metadata.root_memo_id != 2**32 or len(ctx.dependency_maps[this_pid].dep_pids) == 0
+            this_metadata.root_memo_id != 2**32 or len(ctx.dependency_map[this_pid].dep_pids) == 0
         ), "Missing root memo ID and potentially contains a self-reference"
 
         # pod_pickling_stat.append(this_pid, this_obj, this_pod_bytes)  # stat_staticppick
@@ -678,18 +680,18 @@ class StaticPodPicklingDumpSession(PodPicklingDumpSession):
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         assert self.writer is not None
-        for pod_id, deps in self.ctx.dependency_maps.items():
+        for pod_id, deps in self.ctx.dependency_map.items():
             self.writer.write_dep(pod_id, deps)
-            # pod_pickling_stat.fill_dep(pod_id, self.ctx.dependency_maps)  # stat_staticppick
+            # pod_pickling_stat.fill_dep(pod_id, self.ctx.dependency_map)  # stat_staticppick
         # pod_pickling_stat.summary()  # stat_staticppick
 
         self.writer.__exit__(exc_type, exc_val, exc_tb)
         self.writer = None
 
-        logger.error(f"num objects= {len(self.ctx.memo.physical_memo)}")  # stat_numobjs
+        logger.info(f"num objects= {len(self.ctx.memo.physical_memo)}")  # stat_numobjs
 
         if self.pickling.post_podding_fn is not None:
-            self.pickling.post_podding_fn()
+            self.pickling.post_podding_fn(self.ctx.dependency_map)
 
 
 class StaticPodPickling(PodPickling):
