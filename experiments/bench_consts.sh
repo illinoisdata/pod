@@ -148,6 +148,7 @@ SUTS=(
     "snp" 
     "snz" 
     "snx" 
+    "snpfsync"
     "dill" 
     "cpkl" # Recursion error on self-references
     "shev" 
@@ -163,6 +164,7 @@ SUTS=(
     "pgl"
     "pga"
     "pgaz"
+    "pgafsync"
     "pgcache0"
     "pgcache4"
     "pgcache16"
@@ -206,10 +208,15 @@ SUTS=(
     "ppg"
     "prd"
     "pnj"
+    "pnjpickle"
+    "pnjdelta"
+    "pganj"
     "pmg"
     "pgnoop"
     "pflc"
     "prcc"
+    "dillascctest"
+    "pglscalene"
 )
 
 function get_sut_args() {
@@ -224,6 +231,9 @@ function get_sut_args() {
     elif [[ $_SUT == "snx" ]]
     then
         sut_args="--sut snapshotxdelta --pod_dir ${POD_DIR}"
+    elif [[ $_SUT == "snpfsync" ]]
+    then
+        sut_args="--sut snapshot --pod_dir ${POD_DIR} --do_fsync"
     elif [[ $_SUT == "dill" ]]
     then
         sut_args="--sut dill --pod_dir ${POD_DIR}"
@@ -269,6 +279,9 @@ function get_sut_args() {
     elif [[ $_SUT == "pgaz" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --sut_compress"
+    elif [[ $_SUT == "pgafsync" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --do_fsync"
     elif [[ $_SUT == "pgcache0" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async --pod_cache_size 0"
@@ -398,6 +411,15 @@ function get_sut_args() {
     elif [[ $_SUT == "pnj" ]]
     then
         sut_args="--sut pod_neo4j --neo4j_uri neo4j://podneo4j --neo4j_port 7687 --neo4j_password podneo4jPassword --neo4j_database pod"
+    elif [[ $_SUT == "pnjpickle" ]]
+    then
+        sut_args="--sut pod_neo4j --neo4j_uri neo4j://podneo4j --neo4j_port 7687 --neo4j_password podneo4jPassword --neo4j_database pod --podding_model naive --sut_async --pod_cache_size 0"
+    elif [[ $_SUT == "pnjdelta" ]]
+    then
+        sut_args="--sut pod_neo4j --neo4j_uri neo4j://podneo4j --neo4j_port 7687 --neo4j_password podneo4jPassword --neo4j_database pod --podding_model naive --sut_async"
+    elif [[ $_SUT == "pganj" ]]
+    then
+        sut_args="--sut pod_neo4j --neo4j_uri neo4j://podneo4j --neo4j_port 7687 --neo4j_password podneo4jPassword --neo4j_database pod  --podding_model greedy-lgb --roc_path models/roc_lgb.txt --sut_async"
     elif [[ $_SUT == "pmg" ]]
     then
         sut_args="--sut pod_mongo --mongo_hostname podmongo --mongo_port 27017"
@@ -410,6 +432,12 @@ function get_sut_args() {
     elif [[ $_SUT == "prcc" ]]
     then
         sut_args="--sut pod_file --pod_dir ${POD_DIR} --enable_feature --podding_model roc-collect --pod_active_filter False --auto_static_checker always --always_lock_all True"
+    elif [[ $_SUT == "dillascctest" ]]
+    then
+        sut_args="--sut dillascctest --pod_dir ${POD_DIR}"
+    elif [[ $_SUT == "pglscalene" ]]
+    then
+        sut_args="--sut pod_file --pod_dir ${POD_DIR} --podding_model greedy-lgb --roc_path models/roc_lgb.txt --enable_scalene"
     else
         echo "ERROR (get_sut_args): Invalid SUT $_SUT from [ ${SUTS[*]} ]"
         exit 1
@@ -420,10 +448,10 @@ function get_sut_args() {
 
 function prepare_sut() {
     local _SUT=$1
-    if [[ $_SUT == "snp" || $_SUT == "snz" || $_SUT == "snx" ]]
+    if [[ $_SUT == "snp" || $_SUT == "snz" || $_SUT == "snx" || $_SUT == "snpfsync" ]]
     then
         rm -r ${POD_DIR}
-    elif [[ $_SUT == "dill" ]]
+    elif [[ $_SUT == "dill" || $_SUT == "dillascctest" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "cpkl" ]]
@@ -459,13 +487,16 @@ function prepare_sut() {
     elif [[ $_SUT == "pfa" ]]
     then
         rm -r ${POD_DIR}
-    elif [[ $_SUT == "pgl" ]]
+    elif [[ $_SUT == "pgl" || $_SUT == "pglscalene" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pga" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pgaz" ]]
+    then
+        rm -r ${POD_DIR}
+    elif [[ $_SUT == "pgafsync" ]]
     then
         rm -r ${POD_DIR}
     elif [[ $_SUT == "pgcache0" || $_SUT == "pgcache4" || $_SUT == "pgcache16" || $_SUT == "pgcache64" || $_SUT == "pgcache256" || $_SUT == "pgcache1024" || $_SUT == "pgcache4096" || $_SUT == "pgcache16384" || $_SUT == "pgcache65536" || $_SUT == "pgcache262144" || $_SUT == "pgcache1048576" || $_SUT == "pgcache1m" || $_SUT == "pgcache2m" || $_SUT == "pgcache4m" || $_SUT == "pgcache8m" || $_SUT == "pgcache15m" || $_SUT == "pgcache31m" || $_SUT == "pgcache62m" || $_SUT == "pgcache125m" || $_SUT == "pgcache250m" || $_SUT == "pgcache500m" || $_SUT == "pgcache1g" || $_SUT == "pgcache2g" || $_SUT == "pgcache4g" || $_SUT == "pgcache8g" || $_SUT == "pgcache10g" || $_SUT == "pgcache16g" || $_SUT == "pgcache100g" ]]
@@ -506,7 +537,7 @@ function prepare_sut() {
     then
         echo "redis-cli flushall"
         redis-cli -h podredis -p 6379 flushall
-    elif [[ $_SUT == "pnj" ]]
+    elif [[ $_SUT == "pnj" || $_SUT == "pnjpickle" || $_SUT == "pnjdelta" || $_SUT == "pganj" ]]
     then
         echo "cypher-shell \"CREATE OR REPLACE DATABASE pod;\""
         cypher-shell -a neo4j://podneo4j:7687 \

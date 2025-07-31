@@ -70,6 +70,15 @@ class LoadStat:
 
 @dataclass_json
 @dataclass
+class DumpStaticStat:
+    nth: int
+    same_hash: bool
+    stable_hash: bool
+    is_static: bool
+
+
+@dataclass_json
+@dataclass
 class ExpStat:
     dumps: List[DumpStat] = field(default_factory=lambda: [])
     loads: List[LoadStat] = field(default_factory=lambda: [])
@@ -82,6 +91,8 @@ class ExpStat:
     exec_times: List[float] = field(default_factory=lambda: [])
     lock_times: List[float] = field(default_factory=lambda: [])
     join_times: List[float] = field(default_factory=lambda: [])
+
+    dump_statics: List[DumpStaticStat] = field(default_factory=lambda: [])
 
     def add_dump(self, nth: int, time_s: float, storage_b: int) -> None:
         self.dumps.append(
@@ -141,6 +152,16 @@ class ExpStat:
 
     def add_join_time(self, time_s: float) -> None:
         self.join_times.append(time_s)
+
+    def add_dump_static(self, nth: int, same_hash: bool, stable_hash: bool, is_static: bool) -> None:
+        self.dump_statics.append(
+            DumpStaticStat(
+                nth=nth,
+                same_hash=same_hash,
+                stable_hash=stable_hash,
+                is_static=is_static,
+            )
+        )
 
     def summary(self) -> None:
         total_lock_exec_time = sum(self.exec_times)

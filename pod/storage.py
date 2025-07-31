@@ -5,14 +5,15 @@ Key-value storages with correlated/poset reads
 from __future__ import annotations  # isort:skip
 import pod.__pickle__  ## noqa, isort:skip
 
-import glob
 import io
 import os
 import pickle
+import socket
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Queue
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Dict, Generator, List, Optional, Set, Tuple, cast
 
 import lz4.frame as zlib
 import neo4j
@@ -21,6 +22,7 @@ import redis
 import xxhash
 from dataclasses_json import dataclass_json
 from loguru import logger
+from neo4j.exceptions import ServiceUnavailable
 
 try:
     import psycopg2
@@ -29,7 +31,7 @@ except ImportError:
     logger.warning("Failed to import psycopg2")
 
 from pod.algo import union_find
-from pod.common import PodDependency, PodId
+from pod.common import PodDependency, PodId, Rank
 
 POD_CACHE_SIZE = 1_000_000_000
 
@@ -319,6 +321,8 @@ class FilePodStorageWriter(PodWriter):
             self.storage.update_index(self.new_pid_index)
         if len(self.new_pid_synonyms) > 0:
             self.storage.update_pid_synonym(self.new_pid_synonyms)
+        if self.storage.do_fsync:
+            os.sync()
         # logger.warning(f"memo_size= {self.storage.pod_bytes_memo.size}")
 
 
@@ -365,10 +369,11 @@ class FilePodStorageReader(PodReader):
 
 
 class FilePodStorage(PodStorage):
-    def __init__(self, root_dir: Path, memo_hash: bool = True) -> None:
+    def __init__(self, root_dir: Path, memo_hash: bool = True, do_fsync: bool = False) -> None:
         self.root_dir = root_dir
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self.memo_hash = memo_hash
+        self.do_fsync = do_fsync
 
         self.stats = FilePodStorageStats(
             pod_page_count=0,
@@ -1184,40 +1189,131 @@ class Neo4jPodStorageWriter(PodWriter):
     def __init__(self, storage: Neo4jPodStorage) -> None:
         self.storage = storage
         self.pod_data: List[Tuple[bytes, bytes]] = []
+        self.pod_ranks: Dict[bytes, Rank] = {}
         self.dependencies: List[Tuple[bytes, bytes]] = []
+        self.new_pid_synonyms: Dict[PodId, PodId] = {}
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.flush_data()
+        if self.new_pid_synonyms:
+            self.storage.update_pid_synonym(self.new_pid_synonyms)
 
     def flush_data(self):
         with self.storage.session() as session:
-            with session.begin_transaction() as tx:
-                # Write the pod
-                tx.run(
-                    "UNWIND $pods_list AS pod " "CREATE (p:Pod {pod_id: pod[0], pod_bytes: pod[1]}) ", pods_list=self.pod_data
-                )
+            for pod_chunks in self._batch_chunk_pods_by_size(self.pod_data):
+                with session.begin_transaction() as tx:
+                    # Create Pod nodes
+                    tx.run(
+                        """
+                        UNWIND $pods_list AS pod
+                        MERGE (p:Pod {pod_id: pod[0]})
+                        """,
+                        pods_list=[(pod_chunk["pod_id"],) for pod_chunk in pod_chunks],
+                    )
+                    tx.commit()
 
-                # Write all dependencies at once
+                # Chunked Pod data write. Some pods are too large for transaction.
+                with session.begin_transaction() as tx:
+                    tx.run(
+                        """
+                        UNWIND $chunks AS chunk
+                        MATCH (p:Pod {pod_id: chunk.pod_id})
+                        CREATE (p)-[:HAS_CHUNK]->(:Chunk {index: chunk.index, data: chunk.data})
+                        """,
+                        chunks=pod_chunks,
+                    )
+
+                    tx.commit()
+                    logger.debug(f"Written {len(pod_chunks)} chunks")
+
+            # Write pod ranks
+            with session.begin_transaction() as tx:
+                tx.run(
+                    """
+                    UNWIND $ranks AS r
+                    MERGE (p:Pod {pod_id: r.pod_id})
+                    SET p.rank = r.rank
+                    """,
+                    ranks=[{"pod_id": serialize_pod_id(pid), "rank": rank} for pid, rank in self.pod_ranks.items()],
+                )
+                tx.commit()
+                logger.debug(f"Written {len(self.pod_ranks)} ranks")
+
+            # Write dependencies
+            with session.begin_transaction() as tx:
                 tx.run(
                     "UNWIND $deps_list AS dep "
                     "MATCH (p:Pod {pod_id: dep[0]}) "
                     "MATCH (depPod:Pod {pod_id: dep[1]}) "
                     "CREATE (p)-[:DEPENDS_ON]->(depPod)",
-                    deps_list=self.dependencies,
+                    deps_list=[(serialize_pod_id(a), serialize_pod_id(b)) for a, b in self.dependencies],
                 )
                 tx.commit()
+                logger.debug(f"Written {len(self.dependencies)} dependencies")
+
+            # Write synonyms
+            if self.new_pid_synonyms:
+                with session.begin_transaction() as tx:
+                    tx.run(
+                        """
+                        UNWIND $syns AS syn
+                        MATCH (from:Pod {pod_id: syn[0]}), (to:Pod {pod_id: syn[1]})
+                        MERGE (from)-[:SYNONYM_OF]->(to)
+                        """,
+                        syns=[(serialize_pod_id(k), serialize_pod_id(v)) for k, v in self.new_pid_synonyms.items()],
+                    )
+                    tx.commit()
+                    logger.debug(f"Written {len(self.new_pid_synonyms)} synonyms")
 
     def write_pod(self, pod_id: PodId, pod_bytes: bytes) -> None:
-        serialized_pod_id = serialize_pod_id(pod_id)
-        self.pod_data.append((serialized_pod_id, pod_bytes))
+        pod_bytes_key = pod_bytes  # or xxhash hash for large data
+        if pod_bytes_key in self.storage.pod_bytes_memo:
+            same_pid = self.storage.pod_bytes_memo.get(pod_bytes_key)
+            self.new_pid_synonyms[pod_id] = same_pid
+        else:
+            self.storage.pod_bytes_memo.put(pod_bytes_key, pod_id)
+            serialized_pod_id = serialize_pod_id(pod_id)
+            self.pod_data.append((serialized_pod_id, pod_bytes))
 
     def write_dep(self, pod_id: PodId, dep: PodDependency) -> None:
         serialized_pod_id = serialize_pod_id(pod_id)
         new_deps = [(serialized_pod_id, serialize_pod_id(d)) for d in dep.dep_pids]
         self.dependencies += new_deps
+        self.pod_ranks[serialized_pod_id] = dep.rank
+        self.storage.meta_by_pid[pod_id] = dep.meta
+
+    def _batch_chunk_pods_by_size(
+        self,
+        pod_data: List[Tuple[bytes, bytes]],
+    ) -> Generator[List[Dict], None, None]:
+        batch: List[Any] = []
+        total_size = 0
+        size_limit_bytes = 100 * 1024 * 1024
+        for pid_str, pod_bytes in pod_data:
+            for index, chunk in self._chunk_bytes(pod_bytes, size_limit_bytes):
+                chunk_size = len(chunk)
+                if total_size + chunk_size > size_limit_bytes and batch:
+                    logger.debug(f"Batched {total_size} bytes")
+                    yield batch
+                    batch = []
+                    total_size = 0
+                batch.append(
+                    {
+                        "pod_id": pid_str,
+                        "index": index,
+                        "data": chunk,
+                    }
+                )
+                total_size += chunk_size
+        if batch:
+            logger.debug(f"Batched {total_size} bytes")
+            yield batch
+
+    def _chunk_bytes(self, data: bytes, chunk_size: int) -> List[Tuple[int, bytes]]:
+        return [(i, data[i : i + chunk_size]) for i in range(0, len(data), chunk_size)]
 
 
 class Neo4jPodStorageReader(PodReader):
@@ -1225,28 +1321,70 @@ class Neo4jPodStorageReader(PodReader):
         self.storage = storage
         self.hint_pod_ids = hint_pod_ids
         self.cache = cache
+        self._dep_rank_cache: Optional[List[PodId]] = None
 
     def read(self, pod_id: PodId) -> io.IOBase:
-        serialized_pod_id = serialize_pod_id(pod_id)
-        if serialized_pod_id in self.cache:
-            return io.BytesIO(self.cache[serialized_pod_id])
-        with self.storage.session() as session:
-            result = session.run("MATCH (p:Pod {pod_id: $pod_id}) RETURN p.pod_bytes", pod_id=serialized_pod_id)
-            record = result.single()
-        if record is None:
-            raise KeyError(f"Data not found for Pod ID: {pod_id}")
+        resolved_pid = self.storage.resolve_pid_synonym(pod_id)
+        serialized_pid = serialize_pod_id(resolved_pid)
 
-        pod_bytes = record["p.pod_bytes"]
-        pod_bytes = cast(bytes, pod_bytes)
+        if serialized_pid in self.cache:
+            return io.BytesIO(self.cache[serialized_pid])
+
+        with self.storage.session() as session:
+            # Fetch all chunks in order
+            result = session.run(
+                """
+                MATCH (p:Pod {pod_id: $pod_id})-[:HAS_CHUNK]->(c:Chunk)
+                RETURN c.index AS idx, c.data AS data
+                ORDER BY c.index ASC
+                """,
+                pod_id=serialized_pid,
+            )
+            chunks = [record["data"] for record in result]
+
+        if not chunks:
+            raise KeyError(f"No chunks found for Pod ID: {pod_id}")
+
+        pod_bytes = b"".join(chunks)
+        self.cache[serialized_pid] = pod_bytes
         return io.BytesIO(pod_bytes)
+
+    def read_meta(self, pod_id: PodId) -> bytes:
+        return self.storage.meta_by_pid[pod_id]
+
+    def dep_pids_by_rank(self) -> List[PodId]:
+        if self._dep_rank_cache is not None:
+            return self._dep_rank_cache
+
+        serialized_ids = [serialize_pod_id(pid) for pid in self.hint_pod_ids]
+
+        with self.storage.session() as session:
+            result = session.run(
+                """
+                UNWIND $start_ids AS start_id
+                MATCH (start:Pod {pod_id: start_id})-[:DEPENDS_ON*]->(target:Pod)
+                RETURN DISTINCT target.pod_id AS pod_id, target.rank AS rank
+                ORDER BY rank
+                """,
+                start_ids=serialized_ids,
+            )
+
+            self._dep_rank_cache = [deserialize_pod_id(record["pod_id"]) for record in result]
+            return self._dep_rank_cache
 
 
 class Neo4jPodStorage(PodStorage):
     def __init__(self, uri: str, port: int, password: str, database: Optional[str] = None) -> None:
         self.driver = neo4j.GraphDatabase.driver(f"{uri}:{port}", auth=("neo4j", password))
         self.database = database
-        with self.session() as session:
-            session.run("CREATE INDEX pod_id_index IF NOT EXISTS FOR (p:Pod) ON (p.pod_id);")
+        self._create_index_with_retry()
+
+        # For meta storage.
+        self.meta_by_pid: Dict[PodId, bytes] = {}
+
+        # Delta pod detection.
+        self.pod_bytes_memo: PodBytesMemo = PodBytesMemo.new(POD_CACHE_SIZE)
+        self.pod_id_synonym: Dict[PodId, PodId] = self.flatten_synonyms(self.load_pid_synonyms())
 
     def session(self) -> neo4j.Session:
         if self.database is not None:
@@ -1277,25 +1415,78 @@ class Neo4jPodStorage(PodStorage):
 
         return Neo4jPodStorageReader(self, hint_pod_ids, cache)
 
+    # def estimate_size(self) -> int:
+    #     """Gets size of all files in used neo4j database (local)"""
+    #     home_directory = os.path.expanduser("~")
+    #     search_pattern = os.path.join(home_directory, "neo4j-*/data/databases/neo4j")
+    #     matching_directories = glob.glob(search_pattern)
+    #     if len(matching_directories) > 1:
+    #         logger.error("Multiple Neo4j installations found. Please make sure only one exists in your user directory")
+    #         return 0
+    #     if len(matching_directories) == 0:
+    #         logger.error("No Neo4j installation found. Please make sure you have it installed in your user directory")
+    #         return 0
+
+    #     neo4j_dir = matching_directories[0]
+    #     neo4j_path = os.path.join(home_directory, neo4j_dir)
+    #     total_size = 0
+    #     for dirpath, dirnames, filenames in os.walk(neo4j_path):
+    #         for f in filenames:
+    #             fp = os.path.join(dirpath, f)
+    #             if not os.path.islink(fp):
+    #                 total_size += os.path.getsize(fp)
+    #     return total_size
+
     def estimate_size(self) -> int:
-        """Gets size of all files in used neo4j database"""
-        home_directory = os.path.expanduser("~")
-        search_pattern = os.path.join(home_directory, "neo4j-*/data/databases/neo4j")
-        matching_directories = glob.glob(search_pattern)
-        if len(matching_directories) > 1:
-            raise RuntimeError("Multiple Neo4j installations found. Please make sure only one exists in your user directory")
-        elif len(matching_directories) == 0:
-            raise RuntimeError("No Neo4j installation found. Please make sure you have it installed in your user directory")
-        else:
-            neo4j_dir = matching_directories[0]
-        neo4j_path = os.path.join(home_directory, neo4j_dir)
-        total_size = 0
-        for dirpath, dirnames, filenames in os.walk(neo4j_path):
-            for f in filenames:
-                fp = os.path.join(dirpath, f)
-                if not os.path.islink(fp):
-                    total_size += os.path.getsize(fp)
-        return total_size
+        s = socket.create_connection(("podneo4j", 8082))
+        output = s.recv(1024).decode()
+        return int(output.strip().split()[0])
+
+    def load_pid_synonyms(self) -> Dict[PodId, PodId]:
+        syn_map = {}
+        with self.session() as session:
+            result = session.run(
+                """
+                MATCH (from:Pod)-[:SYNONYM_OF]->(to:Pod)
+                RETURN from.pod_id AS from_id, to.pod_id AS to_id
+            """
+            )
+            for record in result:
+                from_pid = deserialize_pod_id(record["from_id"])
+                to_pid = deserialize_pod_id(record["to_id"])
+                syn_map[from_pid] = to_pid
+        return syn_map
+
+    def resolve_pid_synonym(self, pid: PodId) -> PodId:
+        return self.pod_id_synonym.get(pid, pid)
+
+    def update_pid_synonym(self, new_synonyms: Dict[PodId, PodId]):
+        self.pod_id_synonym.update(new_synonyms)
+
+    def flatten_synonyms(self, syn_map: Dict[PodId, PodId]) -> Dict[PodId, PodId]:
+        def resolve(pid):
+            while pid in syn_map:
+                pid = syn_map[pid]
+            return pid
+
+        return {pid: resolve(pid) for pid in syn_map}
+
+    def _create_index_with_retry(self, max_retries=5, initial_delay=1.0):
+        delay = initial_delay
+        for attempt in range(1, max_retries + 1):
+            try:
+                with self.session() as session:
+                    session.run("CREATE INDEX pod_id_index IF NOT EXISTS FOR (p:Pod) ON (p.pod_id);")
+                logger.info("Successfully created pod_id_index.")
+                return
+            except ServiceUnavailable as e:
+                logger.warning(f"Attempt {attempt}: Neo4j unavailable ({e}). Retrying in {delay:.1f}s...")
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff
+            except Exception as e:
+                logger.error(f"Unexpected error while creating index: {e}")
+                raise
+        raise RuntimeError("Failed to create pod_id_index after multiple retries.")
 
     def __del__(self):
         self.driver.close()

@@ -19,6 +19,7 @@ import nbformat
 import numpy as np
 import simple_parsing
 from loguru import logger
+from scalene import scalene_profiler
 
 import pod.storage
 from pod._pod import (
@@ -102,6 +103,7 @@ class BenchArgs:
     exp1_partial_load: bool = True  # Whether to test partial loading.
     auto_static_checker: str = "allowlist"  # Code check and automatically declare static cells.
     exclude_save_names: bool = False  # Whether to exclude selected variable names.
+    enable_scalene: bool = False  # Whether to enable scalene profiler
 
     """ Random mutating list """
     rmlist_num_cells: int = 10  # Number of cells.
@@ -120,6 +122,7 @@ class BenchArgs:
     """ Pod storage """
     sut_async: bool = False  # Use async SUT.
     sut_compress: bool = False  # Compress bytes.
+    do_fsync: bool = False  # Do fsync after each saving.
     always_lock_all: bool = False  # Always lock all variables (disabling active variable locks).
     pod_dir: Optional[Path] = None  # Path to pod storage root directory.
     pod_active_filter: bool = True  # Whether to filter active variables for saving.
@@ -341,7 +344,12 @@ class CodeCheckers:
 
 
 class NotebookExecutor(ExperimentExecutor):
-    def __init__(self, cells: NotebookCells, checker: StaticCodeChecker, the_globals: dict = {}) -> None:
+    def __init__(
+        self,
+        cells: NotebookCells,
+        checker: StaticCodeChecker,
+        the_globals: dict = {},
+    ) -> None:
         ExperimentExecutor.__init__(self)
         self.cells = cells
         self.checker = checker
@@ -369,6 +377,7 @@ class NotebookExecutor(ExperimentExecutor):
                     self.the_globals.set_managed(not is_static),
                 ):
                     exec(cell, self.the_globals, self.the_globals)
+                    self.the_globals.latest_exec_is_static = is_static
                     stdout = stdout_f.getvalue()
                     stderr = stderr_f.getvalue()
             except Exception:
@@ -609,7 +618,7 @@ class SUT:
             return StaticPodPickling(DictPodStorage(), podding_fn=podding_fn, post_podding_fn=post_podding_fn)
         elif args.sut == "snapshot":
             assert args.pod_dir is not None, "snapshot requires --pod_dir"
-            return SnapshotPodPickling(args.pod_dir)
+            return SnapshotPodPickling(args.pod_dir, do_fsync=args.do_fsync)
         elif args.sut == "snapshotzlib":
             assert args.pod_dir is not None, "snapshot requires --pod_dir"
             return CompressedSnapshotPodPickling(args.pod_dir, delta=False)
@@ -622,7 +631,9 @@ class SUT:
                 return StaticPodPickling(
                     CompressedFilePodStorage(args.pod_dir), podding_fn=podding_fn, post_podding_fn=post_podding_fn
                 )
-            return StaticPodPickling(FilePodStorage(args.pod_dir), podding_fn=podding_fn, post_podding_fn=post_podding_fn)
+            return StaticPodPickling(
+                FilePodStorage(args.pod_dir, do_fsync=args.do_fsync), podding_fn=podding_fn, post_podding_fn=post_podding_fn
+            )
         elif args.sut == "pod_psql":
             return StaticPodPickling(
                 PostgreSQLPodStorage(args.psql_hostname, args.psql_port),
@@ -659,6 +670,9 @@ class SUT:
         elif args.sut == "dill":
             assert args.pod_dir is not None, "dill requires --pod_dir"
             return DillObjectStorage(args.pod_dir)
+        elif args.sut == "dillascctest":
+            assert args.pod_dir is not None, "dill requires --pod_dir"
+            return DillObjectStorage(args.pod_dir, test_ascc=True)
         elif args.sut == "cloudpickle":
             assert args.pod_dir is not None, "cloudpickle requires --pod_dir"
             return CloudpickleObjectStorage(args.pod_dir)
@@ -699,8 +713,6 @@ class SUT:
 
 
 def run_exp1_impl(args: BenchArgs) -> None:
-    # from scalene import scalene_profiler
-
     # Setup random state.
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -752,11 +764,13 @@ def run_exp1_impl(args: BenchArgs) -> None:
 
         # Dump current state.
         with SelectNamespace(the_globals, exclude_names=excluded_save_names):
-            # scalene_profiler.start()
+            if args.enable_scalene:
+                scalene_profiler.start()
             dump_start_ts = time.time()
             tid = sut.save(the_globals)
             dump_stop_ts = time.time()
-            # scalene_profiler.stop()
+            if args.enable_scalene:
+                scalene_profiler.stop()
 
         # Record measurements.
         storage_b = sut.estimate_size()
@@ -819,7 +833,11 @@ def run_exp1_impl(args: BenchArgs) -> None:
         load_start_ts = time.time()
         try:
             with BlockTimeout(2400):
+                if args.enable_scalene:
+                    scalene_profiler.start()
                 loaded_globals = sut.load(tid, nameset=load_set)
+                if args.enable_scalene:
+                    scalene_profiler.stop()
         except TimeoutError as e:
             logger.warning(f"{e}")
         load_stop_ts = time.time()
