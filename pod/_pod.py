@@ -42,6 +42,7 @@ class ExperimentNamespace(Namespace):
     def __init__(self, *args, **kwargs) -> None:
         dict.__init__(self, *args, **kwargs)
         self.managed: bool = True
+        self.latest_exec_is_static: bool = True
 
     class ManagedScope:
         def __init__(self, namespace: ExperimentNamespace, managed: bool) -> None:
@@ -134,14 +135,32 @@ class SnapshotObjectStorage(ObjectStorage):
 
 
 class DillObjectStorage(ObjectStorage):
-    def __init__(self, root_dir: Path) -> None:
+    def __init__(self, root_dir: Path, test_ascc: bool = False) -> None:
         self._root_dir = root_dir
         self._root_dir.mkdir(parents=True, exist_ok=True)
+
+        self._test_ascc = test_ascc
+        self._previous_hash: int = hash(b"")
 
     def save(self, namespace: Namespace) -> TimeId:
         tid = step_time_id()
         with open(self.pickle_path(tid), "wb") as f:
-            dill.dump(namespace, f)
+            dill.dump(namespace.items(), f)
+        if self._test_ascc and self._expstat:
+            assert isinstance(namespace, ExperimentNamespace)
+            with open(self.pickle_path(tid), "rb") as f:
+                dumped_hash = hash(f.read())
+                fresh_dumped_hash = hash(dill.dumps(namespace.items()))
+                same_hash = dumped_hash == self._previous_hash
+                stable_hash = fresh_dumped_hash == dumped_hash
+                is_static = namespace.latest_exec_is_static
+                self._expstat.add_dump_static(
+                    tid,
+                    same_hash=same_hash,
+                    stable_hash=stable_hash,
+                    is_static=is_static,
+                )
+                self._previous_hash = dumped_hash
         return tid
 
     def load(self, tid: TimeId, nameset: Optional[Set[str]] = None) -> Namespace:
@@ -156,6 +175,9 @@ class DillObjectStorage(ObjectStorage):
 
     def pickle_path(self, tid: TimeId) -> Path:
         return self._root_dir / f"t{tid}.pkl"
+
+    def instrument(self, expstat: Optional[ExpStat]) -> None:
+        self._expstat = expstat
 
 
 """ Cloudpickle namespace storage """

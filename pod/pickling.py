@@ -7,6 +7,7 @@ import pod.__pickle__  # noqa, isort:skip
 
 import enum
 import io
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 from types import CodeType, FunctionType, ModuleType
@@ -89,15 +90,18 @@ class SnapshotPodPicklingDumpSession(PodPicklingDumpSession):
 
 
 class SnapshotPodPickling(PodPickling):
-    def __init__(self, root_dir: Path) -> None:
+    def __init__(self, root_dir: Path, do_fsync: bool = False) -> None:
         self.root_dir = root_dir
         self.root_dir.mkdir(parents=True, exist_ok=True)
+        self.do_fsync = do_fsync
 
     def dump(self, obj: Object) -> PodId:
         tid = step_time_id()
         pid = PodId(tid, id(obj))
         with open(self.pickle_path(pid), "wb") as f:
             pickle.dump(obj, f)
+        if self.do_fsync:
+            os.sync()
         return pid
 
     def dump_batch(self, pods: Dict[PodId, Object]) -> PodPicklingDumpSession:
